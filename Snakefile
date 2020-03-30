@@ -53,7 +53,13 @@ rule all:
          expand("gbff_files/{sample}.gbff.gz_md5checksums.txt", sample= sample_names),
          expand("gbff_files_unzipped/{sample}.gbff", sample=sample_names),
          expand("fasta_files/{sample}_proteins.fa", sample=sample_names),
-         expand("fasta_files_combined/all_proteins_combined_{db_id}.fa", db_id= combined_fasta_chunks_index)
+         expand("fasta_files_combined/all_proteins_combined_{db_id}.fa", db_id= combined_fasta_chunks_index),
+         expand("fasta_files_combined/all_proteins_combined_{db_id}.fa.phr", db_id=combined_fasta_chunks_index),
+         expand("fasta_files_combined/all_proteins_combined_{db_id}.fa.pin", db_id=combined_fasta_chunks_index),
+         expand("fasta_files_combined/all_proteins_combined_{db_id}.fa.psq", db_id=combined_fasta_chunks_index),
+         # "fasta_files_combined/all_proteins_combined_master.pal",
+         # "results/blast_out",
+         # "results/blast_output_table.txt"
 
 rule download_gbff_files:
     output: "gbff_files/{sample}.gbff.gz" , "gbff_files/{sample}.gbff.gz_md5checksums.txt"
@@ -204,7 +210,6 @@ combined_fasta_dict= dict(zip(combined_fasta_chunks_index,fasta_file_chunks))
 def get_combined_fasta_samples(wildcards):
     return [i for i in combined_fasta_dict[int(wildcards.db_id)]]
 
-
 rule combine_fasta:
     input: get_combined_fasta_samples
     # input: expand("fasta_files/{sample}_proteins.fa", sample=sample_names)
@@ -226,3 +231,12 @@ rule combine_fasta:
             for f in files:
                     with open(f) as infile:
                             outfile.write(infile.read())
+
+rule make_blastdb:
+    input:
+        file= rules.combine_fasta.output
+    output:
+        "fasta_files_combined/all_proteins_combined_{db_id}.fa.phr",
+        "fasta_files_combined/all_proteins_combined_{db_id}.fa.pin",
+        "fasta_files_combined/all_proteins_combined_{db_id}.fa.psq",
+    shell:''' makeblastdb -in {input.file} -dbtype prot'''
