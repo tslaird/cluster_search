@@ -35,22 +35,28 @@ sample_names_df=pd.DataFrame([re.search("GCF_.+genomic(?=.gbff.gz)?",i.split('/'
 sample_names_df.to_csv("sample_names.txt", sep='\t', index=False, header=False)
 sample_names=[re.search("GCF_.+genomic(?=.gbff.gz)?",i.split('/')[-1])[0] for i in all_paths]
 
+
+
 chunk_size=5000
 fasta_names= ["fasta_files/"+i+"_proteins.fa" for i in sample_names]
 fasta_file_chunks= [fasta_names[i * chunk_size:(i + 1) * chunk_size] for i in range((len(fasta_names) + chunk_size - 1) // chunk_size )]
+combined_fasta_chunks_index=list(range(0,len(fasta_file_chunks)))
 
-combined_fasta_chunks=list(range(0,len(fasta_file_chunks)))
+
+
 
 download_dict= dict(zip(sample_names, all_paths))
 
 rule all:
     input:
          expand("gbff_files/{sample}.gbff.gz", sample=sample_names),
+         expand("gbff_files/{sample}.gbff.gz_md5checksums.txt", sample= sample_names),
          expand("gbff_files_unzipped/{sample}.gbff", sample=sample_names),
-         expand("fasta_files/{sample}_proteins.fa", sample=sample_names)
+         expand("fasta_files/{sample}_proteins.fa", sample=sample_names),
+         expand("fasta_files_combined/all_proteins_combined_{db_id}.fa", db_id= combined_fasta_chunks_index)
 
 rule download_gbff_files:
-    output: "gbff_files/{sample}.gbff.gz"
+    output: "gbff_files/{sample}.gbff.gz" , "gbff_files/{sample}.gbff.gz_md5checksums.txt"
     params:
         # dynamically generate the download link directly from the dictionary
         download_link = lambda wildcards: download_dict[wildcards.sample]
@@ -190,3 +196,33 @@ rule parse_gbff_files:
         with open("fasta_files/"+outname,'w+') as output:
             output.writelines(result)
         print("extracted proteins for: " + gbff_file)
+
+
+
+combined_fasta_dict= dict(zip(combined_fasta_chunks_index,fasta_file_chunks))
+
+def get_combined_fasta_samples(wildcards):
+    return [i for i in combined_fasta_dict[int(wildcards.db_id)]]
+
+
+rule combine_fasta:
+    input: get_combined_fasta_samples
+    # input: expand("fasta_files/{sample}_proteins.fa", sample=sample_names)
+    output: "fasta_files_combined/all_proteins_combined_{db_id}.fa"
+    params:
+        file_list = lambda wildcards: combined_fasta_dict[int(wildcards.db_id)]
+    run:
+        import glob
+        import concurrent.futures
+        import psutil
+        import subprocess
+        number_of_cpus = psutil.cpu_count()
+        # file_chunks= [fasta_files[i * chunk_size:(i + 1) * chunk_size] for i in range((len(fasta_files) + chunk_size - 1) // chunk_size )]
+        # fasta_files = glob.glob('fasta_files/*.fa')
+        # file_chunks = [fasta_files[i * chunk_size:(i + 1) * chunk_size] for i in range((len(fasta_files) + chunk_size - 1) // chunk_size )]
+        # os.mkdir("fasta_files_combined")
+        with open('fasta_files_combined/all_proteins_combined_'+wildcards.db_id+".fa", 'w') as outfile:
+            files = params.file_list
+            for f in files:
+                    with open(f) as infile:
+                            outfile.write(infile.read())
