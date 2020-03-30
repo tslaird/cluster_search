@@ -57,7 +57,7 @@ rule all:
          expand("fasta_files_combined/all_proteins_combined_{db_id}.fa.phr", db_id=combined_fasta_chunks_index),
          expand("fasta_files_combined/all_proteins_combined_{db_id}.fa.pin", db_id=combined_fasta_chunks_index),
          expand("fasta_files_combined/all_proteins_combined_{db_id}.fa.psq", db_id=combined_fasta_chunks_index),
-         # "fasta_files_combined/all_proteins_combined_master.pal",
+         "fasta_files_combined/all_proteins_combined_master.pal",
          # "results/blast_out",
          # "results/blast_output_table.txt"
 
@@ -240,3 +240,16 @@ rule make_blastdb:
         "fasta_files_combined/all_proteins_combined_{db_id}.fa.pin",
         "fasta_files_combined/all_proteins_combined_{db_id}.fa.psq",
     shell:''' makeblastdb -in {input.file} -dbtype prot'''
+
+
+
+rule make_master_db:
+    input: "fasta_files_combined/all_proteins_combined_"+str(max(combined_fasta_chunks_index))+".fa.psq"
+    output: "fasta_files_combined/all_proteins_combined_master.pal"
+    # params:
+    #     combined_files_str= " ".join(glob.glob('fasta_files_combined/all_proteins_combined_*.fa'))
+    # wildcard_constraints: db_id= '\d+'
+    run:
+        combined_files_list = ["fasta_files_combined/all_proteins_combined_"+str(i)+".fa" for i in combined_fasta_chunks_index]
+        combined_files_str = " ".join(combined_files_list)
+        subprocess.call(['blastdb_aliastool','-dblist',combined_files_str,'-dbtype','prot','-out','fasta_files_combined/all_proteins_combined_master','-title','all_proteins_combined_master'])
