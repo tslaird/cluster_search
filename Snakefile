@@ -58,8 +58,8 @@ rule all:
          expand("fasta_files_combined/all_proteins_combined_{db_id}.fa.pin", db_id=combined_fasta_chunks_index),
          expand("fasta_files_combined/all_proteins_combined_{db_id}.fa.psq", db_id=combined_fasta_chunks_index),
          "fasta_files_combined/all_proteins_combined_master.pal",
-         # "results/blast_out",
-         # "results/blast_output_table.txt"
+         "results/blast_out",
+         "results/blast_output_table.txt"
 
 rule download_gbff_files:
     output: "gbff_files/{sample}.gbff.gz" , "gbff_files/{sample}.gbff.gz_md5checksums.txt"
@@ -195,6 +195,7 @@ rule parse_gbff_files:
                          almost_all_items = re.sub('\n|\s{4,}','',almost_all_items)
                          all_items = "%s\n" % (almost_all_items)
                      #all_proteins.add(">"+assembly+'•'+locus+'•'+locus_tag+'•'+biosample+'•'+product+'•'+coords+'•'+protein_id+'\n'+protein+'\n')
+                     all_items= re.sub(' |,','_',all_items)
                      all_proteins.append(all_items)
         result= '\n'.join(all_proteins)+'\n'
         outname = [re.sub('.gbk|.gbff','_proteins.fa', gbff_file)]
@@ -253,3 +254,18 @@ rule make_master_db:
         combined_files_list = ["fasta_files_combined/all_proteins_combined_"+str(i)+".fa" for i in combined_fasta_chunks_index]
         combined_files_str = " ".join(combined_files_list)
         subprocess.call(['blastdb_aliastool','-dblist',combined_files_str,'-dbtype','prot','-out','fasta_files_combined/all_proteins_combined_master','-title','all_proteins_combined_master'])
+
+rule blastp:
+    input: rules.make_master_db.output
+    output:"results/blast_out"
+    params:
+        blastp_threads = psutil.cpu_count()
+    # run:
+    #     subprocess.call(['blastp','-db','fasta_files_combined/all_proteins_combined_master','-query','iac_proteins.fasta','-out','blast_out','-outfmt','6 qseqid qgi qacc sseqid sallseqid sgi sallgi sacc sallacc qstart qend sstart send qseq sseq evalue bitscore score length qlen slen pident nident mismatch positive gapopen gaps ppos frames qframe sframe btop staxids sscinames scomnames sblastnames sskingdoms stitle salltitles sstrand qcovs qcovhsp qcovus','-max_target_seqs','50000','-num_threads','4','-evalue','0.1'])
+    shell:
+        '''blastp -db fasta_files_combined/all_proteins_combined_master -query iac_proteins.fasta -out results/blast_out -outfmt "6 qseqid qgi qacc sseqid sallseqid sgi sallgi sacc sallacc qstart qend sstart send qseq sseq evalue bitscore score length qlen slen pident nident mismatch positive gapopen gaps ppos frames qframe sframe btop staxids sscinames scomnames sblastnames sskingdoms stitle salltitles sstrand qcovs qcovhsp qcovus" -max_target_seqs 50000 -num_threads {params.blastp_threads} -evalue 0.1'''
+
+rule add_header_to_blast_out:
+    input: rules.blastp.output
+    output: "results/blast_output_table.txt"
+    shell:'''echo -e "qseqid\tqgi\tqacc\tsseqid\tsallseqid\tsgi\tsallgi\tsacc\tsallacc\tqstart\tqend\tsstart\tsend\tqseq\tsseq\tevalue\tbitscore\tscore\tlength\tqlen\tslen\tpident\tnident\tmismatch\tpositive\tgapopen\tgaps\tppos\tframes\tqframe\tsframe\tbtop\tstaxids\tsscinames\tscomnames\tsblastnames\tsskingdoms\tstitle\tsalltitles\tsstrand\tqcovs\tqcovhsp\tqcovus" | cat - results/blast_out > results/blast_output_table.txt'''
