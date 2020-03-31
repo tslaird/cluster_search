@@ -59,7 +59,10 @@ rule all:
          expand("fasta_files_combined/all_proteins_combined_{db_id}.fa.psq", db_id=combined_fasta_chunks_index),
          "fasta_files_combined/all_proteins_combined_master.pal",
          "results/blast_out",
-         "results/blast_output_table.txt"
+         "results/blast_output_table.txt",
+         "results/iac_positive_accessions.txt",
+         "results/iac_positive_df.tsv",
+         "results/iac_positive_df.pickle"
 
 rule download_gbff_files:
     output: "gbff_files/{sample}.gbff.gz" , "gbff_files/{sample}.gbff.gz_md5checksums.txt"
@@ -269,3 +272,233 @@ rule add_header_to_blast_out:
     input: rules.blastp.output
     output: "results/blast_output_table.txt"
     shell:'''echo -e "qseqid\tqgi\tqacc\tsseqid\tsallseqid\tsgi\tsallgi\tsacc\tsallacc\tqstart\tqend\tsstart\tsend\tqseq\tsseq\tevalue\tbitscore\tscore\tlength\tqlen\tslen\tpident\tnident\tmismatch\tpositive\tgapopen\tgaps\tppos\tframes\tqframe\tsframe\tbtop\tstaxids\tsscinames\tscomnames\tsblastnames\tsskingdoms\tstitle\tsalltitles\tsstrand\tqcovs\tqcovhsp\tqcovus" | cat - results/blast_out > results/blast_output_table.txt'''
+
+rule download_gtdb:
+    input: "results/blast_output_table.txt"
+    output: 'gtdb/bac120_metadata_r89.tsv'
+    run:
+        urllib.request.urlretrieve("https://data.ace.uq.edu.au/public/gtdb/data/releases/release89/89.0/bac120_metadata_r89.tsv",'gtdb/bac120_metadata_r89.tsv')
+
+
+
+rule parse_blastp:
+    input: 'gtdb/bac120_metadata_r89.tsv'
+    threads: 1
+    output:
+        "results/iac_positive_accessions.txt",
+        "results/iac_positive_df.tsv",
+        "results/iac_positive_df.pickle"
+    run:
+        import re
+        import sys
+        import pandas as pd
+        import pycurl
+        from io import BytesIO
+        import time
+        import xml.etree.ElementTree as ET
+        import numpy as np
+        import multiprocessing as mp
+        import glob
+        import os
+        blastout = pd.read_csv("results/blast_output_table.txt", sep='\t', low_memory = False)
+        print('Editing blastp output file')
+        blastout[["filename","assembly","accession","locus_tag","old_locus_tag","name","biosample","protein_name","coordinates","protein_id"]] = blastout['stitle'].str.split("!!", expand = True)
+        blastout['direction']= [-1 if re.match('complement',str(c)) else 1 for c in blastout['coordinates']]
+        blastout['join_status'] = [1 if re.match('join',str(c)) else 0 for c in blastout['coordinates']]
+        #extracts start and end coordinates from the coordinates column
+        blastout['start_coord'] = [re.search('\d+?(?=\.\.(\d|\>))',str(c)).group(0) for c in blastout['coordinates'] ]
+        blastout['start_coord'] = [re.sub('join|complement|join\(|complement|>|<|\)|\(|,\d+',"",str(c)) for c in blastout['start_coord'] ]
+        blastout['start_coord'] = blastout['start_coord'].astype(int)
+        blastout['end_coord'] = [re.search('(?<=\.(\.|\>))\d+',str(c)).group(0) for c in blastout['coordinates'] ]
+        blastout['end_coord'] = [re.sub('>|<|\)|\(',"",c) for c in blastout['end_coord'] ]
+        blastout['end_coord'] = blastout['end_coord'].astype(int)
+        blastout['middle_coord'] = (  blastout['start_coord'] + blastout['end_coord'] )/2
+        print('Filtering blastp output file')
+        blastout_filtered = blastout[(blastout["qseqid"].isin(["IacA","IacB","IacC","IacD","IacE","IacH","IacI"])) &
+                (blastout['evalue'] <= 1e-10) & (blastout['bitscore']>=50)]
+        #print raw blast out statistics:
+        iac_proteins = ['IacA','IacB','IacC','IacD','IacE','IacF','IacG','IacR','IacH','IacI']
+        raw_blast_stats=[]
+        for i in iac_proteins:
+            genome_count = len(list(set(blastout[blastout['qseqid']== i]['assembly'] )))
+            total_count = len(blastout[blastout['qseqid']== i])
+            raw_blast_stats.append('Genomes with homologue to '+i+" "+str(genome_count)+"\n")
+            raw_blast_stats.append('Total homologue count for '+i+" "+str(total_count)+"\n")
+        with open("results/raw_blast_stats.txt", 'w') as f:
+            f.writelines(raw_blast_stats)
+        filtered_blast_stats=[]
+        for i in iac_proteins:
+            genome_count = len(list(set(blastout_filtered[blastout_filtered['qseqid']== i]['assembly'] )))
+            total_count = len(blastout_filtered[blastout_filtered['qseqid']== i])
+            filtered_blast_stats.append('Genomes with homologue to '+i+" "+str(genome_count)+"\n")
+            filtered_blast_stats.append('Total homologue count for '+i+" "+str(total_count)+"\n")
+        with open("results/filtered_blast_stats.txt", 'w') as f:
+            f.writelines(filtered_blast_stats)
+        print('Defining function')
+        def parseblastout2(accession):
+            print("parsing proteins from: "+ accession )
+            genome_match= blastout_filtered[blastout_filtered['accession'] ==accession]
+            #if len(genome_match) > 4:
+            #the following filters the genomes if they have 6 of 7 of the iacABCDEH or I
+            #this filter takes into account having multiples of a hit and filters based on presence or absence
+            if sum(gene in list(genome_match['qseqid']) for gene in ["IacA","IacB","IacC","IacD","IacE","IacH","IacI"]) >= 6:
+                genome_match_sorted = genome_match.sort_values(by='start_coord')
+                middle_coords = genome_match_sorted['middle_coord']
+                middle_coords_np = np.array(middle_coords)
+                genome_match_sorted['groups']=list(np.cumsum([0] + list(1*(middle_coords_np[1:] - middle_coords_np[0:-1] >= 10000))) + 1)
+                list_of_clusters = []
+                for cluster_number, df in genome_match_sorted.groupby('groups'):
+                    if len(df) >= 1:
+                        hit_list = list(df['locus_tag'])
+                        old_locus_hit_list = list(df['old_locus_tag'])
+                        protein_name_list = list(df['protein_name'])
+                        protein_id_list = list(df['protein_id'])
+                        query_list = list(df['qseqid'])
+                        if sum(df['direction']) < 0:
+                            df['actual_start_tmp'] = df['start_coord']
+                            df['start_coord']= df['end_coord'] * -1
+                            df['end_coord']= df['actual_start_tmp']* -1
+                            df['direction'] = df['direction'] *-1
+                            df.sort_values(by='start_coord',inplace=True)
+                        order = [ ("| " + gene['qseqid'] + " 〉") if gene['direction'] == 1 else ("〈 " + gene['qseqid'] + " |") for index,gene in df.iterrows()  ]
+                        order_pident = [ ("| " + gene['qseqid']+':'+ str(round(gene['pident'],2)) + " 〉") if gene['direction'] == 1 else ("〈 " +  gene['qseqid']+':'+ str(round(gene['pident'],2)) + " |") for index,gene in df.iterrows()  ]
+                        dist = list(np.array(df['start_coord'][1:]) -  np.array(df['end_coord'][:-1]))
+                        dist = ["-"+str(d)+"-" for d in dist]
+                        #obtains "| A 〉-23-| B 〉-23-| C 〉"
+                        synteny_dir_dist=''.join(sum(zip(order, dist+[0]), ())[:-1])
+                        synteny_dir_dist = re.sub("Iac" ,"", synteny_dir_dist)
+                        #obtains "| A 〉| B 〉| C 〉"
+                        synteny_dir =''.join(order)
+                        synteny_dir = re.sub("Iac" ,"", synteny_dir)
+                        #obtains "| A:23.23 〉| B:23.23〉| C:23.23 〉"
+                        synteny_dir_pident =''.join(order_pident)
+                        synteny_dir_pident = re.sub("Iac" ,"", synteny_dir_pident)
+                        #obtains "A-B-C"
+                        synteny= re.sub("\n" ,"-", df['qseqid'].to_string(index=False))
+                        synteny= re.sub("Iac" ,"", synteny)
+                        filename = list(set(df['filename']))[0]
+                        biosample = list(set(df['biosample']))[0]
+                        name = list(set(df['name']))[0]
+                        assembly= re.sub("\{|\}|\'","", str(set(df['assembly'])) )
+                        accession = re.sub("\{|\}|\'","", str(set(df['accession'])) )
+                        #sgi = re.sub("\{|\}|\'","", str(set(df['sgi'])) )
+                        cluster_len= max(df['end_coord']) - min(df['start_coord'])
+                        number_of_hits = len(df)
+                        list_of_clusters.append([accession, filename, biosample, number_of_hits , cluster_len, synteny, synteny_dir_dist, synteny_dir_pident, synteny_dir, assembly, accession, name, hit_list, old_locus_hit_list, protein_name_list, protein_id_list, query_list, cluster_number])
+                return(list_of_clusters)
+        print('\nParsing filtered blastp output file')
+        parse_blastp_input= list(set(blastout_filtered['accession']))
+        print(parse_blastp_input)
+        result_list=[]
+        with concurrent.futures.ThreadPoolExecutor(max_workers=None) as executor:
+            for i in executor.map(parseblastout2, parse_blastp_input):
+                result_list.append(i)
+                pass
+        # pool_parse_blastp = mp.Pool(mp.cpu_count()-2)
+        # pool_parse_blastp_output = pool_parse_blastp.map(parseblastout2, [i for i in parse_blastp_input])
+        # pool_parse_blastp.close()
+        print('\nObtaining iac cluster positive data frame')
+        iac_positive = list(filter(None, result_list))
+        iac_positive_flat = [item for sublist in iac_positive for item in sublist]
+        iac_positive_df= pd.DataFrame(iac_positive_flat, columns=('genome_acc','filename','biosample', 'hits', 'cluster_length','synteny','synteny_dir_dist','synteny_dir_pident','synteny_dir','assembly','accession','name','hit_list','old_locus_hit_list','protein_name_list','protein_id_list','query_list','cluster_number'))
+        iac_positive_df=iac_positive_df[[len(set(i))>=6 for i in iac_positive_df['synteny'].str.findall('\w')]]
+        iac_positive_df['contig'] = iac_positive_df['name'].str.contains('supercont|ctg|node|contig|scaffold|contigs',case=False)
+        iac_positive_df['complete_genome']= iac_positive_df['name'].str.contains('complete',case=False)
+        iac_positive_df['plasmid'] = iac_positive_df['name'].str.contains('plasmid')
+        iac_positive_df['has_overlap'] = iac_positive_df['synteny_dir_dist'].str.contains("--")
+        iac_positive_df['duplicated']= iac_positive_df.duplicated(subset="filename")
+        print('Writing positive accessions to file')
+        assembly_list = "\n".join(list(set(iac_positive_df['assembly']))) + "\n"
+        with open("results/iac_positive_accessions.txt",'w+') as output:
+            output.writelines(assembly_list)
+        print('Fetching genome metadata')
+        all_accs=list(set(iac_positive_df['accession']))
+        all_biosamples = list(iac_positive_df['biosample'])
+        print(all_biosamples)
+        batch=150
+        id_batches = [all_biosamples[i * batch:(i + 1) * batch] for i in range((len(all_biosamples) + batch - 1) // batch )]
+        id_batch_str=[]
+        for i in id_batches:
+            id_list=re.sub('\n',',',str(i))
+            id_list=re.sub(' ','',id_list)
+            id_list=re.sub("NA\',|\'",'',id_list)
+            id_list=re.sub("\[|\]","'",id_list)
+            id_batch_str.append(id_list)
+        isolation_source_dict={}
+        isolation_source_dict["NA"] = "NA"
+        env_biome_dict={}
+        env_biome_dict["NA"] = "NA"
+        env_feature_dict={}
+        env_feature_dict["NA"] = "NA"
+        host_dict={}
+        host_dict["NA"] = "NA"
+        host_sciname_dict={}
+        host_sciname_dict["NA"] = "NA"
+        strain_dict={}
+        strain_dict["NA"] = "NA"
+        for i in id_batch_str:
+            url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=biosample&id=" + i + "&api_key=52553dfd9c090cfba1c3b28a45d8a648fd09"
+            print(url)
+            buffer = BytesIO()
+            c = pycurl.Curl()
+            c.setopt(c.URL, url)
+            c.setopt(c.WRITEDATA, buffer)
+            c.perform()
+            c.close()
+            body = buffer.getvalue()
+            out=body.decode('iso-8859-1')
+            root = ET.fromstring(out)
+            for i in root.findall('./BioSample'):
+                bs_text = ET.tostring(i).decode('ISO-8859-1')
+                bs_acc=re.findall('(?<=\saccession\=")\w+',bs_text)[0]
+                isolation_source= i.findall('./Attributes/Attribute[@attribute_name="isolation_source"]')
+                if isolation_source:
+                    isolation_source_dict[bs_acc] = isolation_source[0].text
+                else:
+                    isolation_source_dict[bs_acc] = "NA"
+                env_biome= i.findall('./Attributes/Attribute[@attribute_name="env_biome"]')
+                if env_biome:
+                    env_biome_dict[bs_acc] = env_biome[0].text
+                else:
+                    env_biome_dict[bs_acc] = "NA"
+                env_feature= i.findall('./Attributes/Attribute[@attribute_name="env_feature"]')
+                if env_feature:
+                    env_feature_dict[bs_acc] = env_feature[0].text
+                else:
+                    env_feature_dict[bs_acc] = "NA"
+                host= i.findall('./Attributes/Attribute[@attribute_name="host"]')
+                if host:
+                    host_dict[bs_acc] = host[0].text
+                else:
+                    host_dict[bs_acc] = "NA"
+                host_sciname= i.findall('./Attributes/Attribute[@attribute_name="host scientific name"]')
+                if host_sciname:
+                    host_sciname_dict[bs_acc] = host_sciname[0].text
+                else:
+                    host_sciname_dict[bs_acc] = "NA"
+                strain= i.findall('./Attributes/Attribute[@attribute_name="strain"]')
+                if strain:
+                    strain_dict[bs_acc] = strain[0].text
+                else:
+                    strain_dict[bs_acc] = "NA"
+        print(isolation_source_dict)
+        iac_positive_df['isolation_src'] = iac_positive_df['biosample'].map(isolation_source_dict)
+        iac_positive_df['env_biome'] = iac_positive_df['biosample'].map(env_biome_dict)
+        iac_positive_df['env_feature'] = iac_positive_df['biosample'].map(env_feature_dict)
+        iac_positive_df['host'] = iac_positive_df['biosample'].map(host_dict)
+        iac_positive_df['host_sciname'] = iac_positive_df['biosample'].map(host_sciname_dict)
+        iac_positive_df['strain'] = iac_positive_df['biosample'].map(strain_dict)
+        all_assemblies= ['RS_'+ i for i in list(set(iac_positive_df['assembly']))]
+        gtdb_metadata = pd.read_csv('gtdb/bac120_metadata_r89.tsv', sep='\t')
+        gtdb_matches= gtdb_metadata[gtdb_metadata['accession'].isin(all_assemblies)]
+        gtdb_matches.loc[:,'accession'] = gtdb_matches['accession'].str.replace('RS_','')
+        gtdb_dict = gtdb_matches[['accession','gtdb_taxonomy']].to_dict()
+        gtdb_dict = dict(zip(gtdb_matches['accession'], gtdb_matches['gtdb_taxonomy']))
+        ncbi_dict = dict(zip(gtdb_matches['accession'], gtdb_matches['ncbi_taxonomy']))
+        iac_positive_df['gtdb_tax'] = iac_positive_df['assembly'].map(gtdb_dict)
+        iac_positive_df['ncbi_tax'] = iac_positive_df['assembly'].map(ncbi_dict)
+        iac_positive_df['same_taxonomy'] = iac_positive_df['gtdb_tax'] == iac_positive_df['ncbi_tax']
+        iac_positive_df[['domain_gtdb','phylum_gtdb','class_gtdb','order_gtdb','family_gtdb','genus_gtdb','species_gtdb']]=iac_positive_df['gtdb_tax'].str.split(";", expand = True)
+        print('\nWriting iac cluster positive data frame to file')
+        iac_positive_df.to_csv("results/iac_positive_df.tsv",sep = '\t', index = False)
+        iac_positive_df.to_pickle("results/iac_positive_df.pickle")
