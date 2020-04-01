@@ -358,6 +358,7 @@ rule parse_blastp:
                         protein_name_list = list(df['protein_name'])
                         protein_id_list = list(df['protein_id'])
                         query_list = list(df['qseqid'])
+                        coord_list = list(zip(df['start_coord'], df['end_coord'],df['direction'],df['qseqid']))
                         if sum(df['direction']) < 0:
                             df['actual_start_tmp'] = df['start_coord']
                             df['start_coord']= df['end_coord'] * -1
@@ -388,7 +389,7 @@ rule parse_blastp:
                         #sgi = re.sub("\{|\}|\'","", str(set(df['sgi'])) )
                         cluster_len= max(df['end_coord']) - min(df['start_coord'])
                         number_of_hits = len(df)
-                        list_of_clusters.append([accession, filename, biosample, number_of_hits , cluster_len, synteny, synteny_dir_dist, synteny_dir_pident, synteny_dir, assembly, accession, name, hit_list, old_locus_hit_list, protein_name_list, protein_id_list, query_list, cluster_number])
+                        list_of_clusters.append([accession, filename, biosample, number_of_hits , cluster_len, synteny, synteny_dir_dist, synteny_dir_pident, synteny_dir, assembly, accession, name, hit_list, old_locus_hit_list, protein_name_list, protein_id_list, query_list, coord_list, cluster_number])
                 return(list_of_clusters)
         print('\nParsing filtered blastp output file')
         parse_blastp_input= list(set(blastout_filtered['accession']))
@@ -404,7 +405,7 @@ rule parse_blastp:
         print('\nObtaining iac cluster positive data frame')
         iac_positive = list(filter(None, result_list))
         iac_positive_flat = [item for sublist in iac_positive for item in sublist]
-        iac_positive_df= pd.DataFrame(iac_positive_flat, columns=('genome_acc','filename','biosample', 'hits', 'cluster_length','synteny','synteny_dir_dist','synteny_dir_pident','synteny_dir','assembly','accession','name','hit_list','old_locus_hit_list','protein_name_list','protein_id_list','query_list','cluster_number'))
+        iac_positive_df= pd.DataFrame(iac_positive_flat, columns=('genome_acc','filename','biosample', 'hits', 'cluster_length','synteny','synteny_dir_dist','synteny_dir_pident','synteny_dir','assembly','accession','name','hit_list','old_locus_hit_list','protein_name_list','protein_id_list','query_list','coord_list','cluster_number'))
         iac_positive_df=iac_positive_df[[len(set(i))>=6 for i in iac_positive_df['synteny'].str.findall('\w')]]
         iac_positive_df['contig'] = iac_positive_df['name'].str.contains('supercont|ctg|node|contig|scaffold|contigs',case=False)
         iac_positive_df['complete_genome']= iac_positive_df['name'].str.contains('complete',case=False)
