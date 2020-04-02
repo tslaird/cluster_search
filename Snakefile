@@ -737,7 +737,8 @@ rule fetch_neighborhoods:
         print('\nMerging all data and writing it to file')
         iac_positive_df = pd.read_pickle("results/iac_positive_df.pickle")
         iac_pos_neighborhoods_df = pd.read_pickle("results/iac_pos_neighborhoods.pickle")
-        iac_positive_all = pd.merge(iac_pos_neighborhoods_df,iac_positive_df, on = ["accession","cluster_number"])
+        iac_positive_all = pd.merge(iac_pos_neighborhoods_df,iac_positive_df, on = ["accession","cluster_number","assembly"])
+        iac_positive_all = iac_positive_all.rename(columns={"coord_list_y": "coord_list"}).drop(columns=['coord_list_x'])
         iac_positive_all_gtdb= iac_positive_all[iac_positive_all['gtdb_tax'].notnull()]
         iac_positive_all.to_pickle("results/iac_positive_all_data.pickle")
         iac_positive_all.to_csv("results/iac_positive_all_data.tsv", sep = '\t', index = False)
