@@ -14,3 +14,18 @@ for i in all_fasta:
     t=i.count("t")
     GCcontent= (g+c)/(g+c+a+t)
     print(GCcontent)
+
+start=min(cluster.loc['coord_list'])[0]
+end=max(cluster.loc['coord_list'])[1]
+regex_str=acc+"[\s+\S+]+\/\/"
+all_cluster_fasta = re.findall(regex_str,gbff_file)[0]
+all_cluster_fasta = re.findall("(?<=ORIGIN)[\s+\S+]+(?=\/\/)",all_cluster_fasta)[0]
+all_cluster_fasta = re.sub(" |\d|\n","",all_cluster_fasta)
+
+cluster_seq = all_cluster_fasta[start+1:end+1]
+g=cluster_seq.count("g")
+c=cluster_seq.count("c")
+a=cluster_seq.count("a")
+t=cluster_seq.count("t")
+GCcontent= (g+c)/(g+c+a+t)
+print(GCcontent)

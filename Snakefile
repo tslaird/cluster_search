@@ -150,6 +150,7 @@ rule parse_gbff_files:
         product_sub = re.compile('\n|\s{19}')
         protein_out_sub = re.compile('\n|(\s+)')
         separate_re = re.compile('//\n')
+        pseudogene_re = re.compile('(?<=\/)pseudo(?=\n)')
         gbff_file= str(input)
         with open(gbff_file) as file:
             file_text=file.read()
@@ -185,6 +186,10 @@ rule parse_gbff_files:
                          product = 'NULL'
                      coords = coords_re.search(f).group(0)
                      protein_id = protein_id_re.search(f)
+                     if pseudogene_re.search(f):
+                         pseudogene = "PSEUDOGENE"
+                     else:
+                         pseudogene = "NULL"
                      if protein_id:
                          protein_id_out = protein_id.group(0)
                      else:
@@ -194,11 +199,11 @@ rule parse_gbff_files:
                          protein_out = protein.group(0)
                          protein_out = protein_out_sub.sub('', protein_out)
                          protein_out = textwrap.fill(protein_out, 70)
-                         almost_all_items = ">%s!!%s!!%s!!%s!!%s!!%s!!%s!!%s!!%s!!%s" % (gbff_file.split("/")[-1],assembly,locus,locus_tag,old_locus_tag,definition,biosample_out,product,coords, protein_id_out)
+                         almost_all_items = ">%s!!%s!!%s!!%s!!%s!!%s!!%s!!%s!!%s!!%s!!%s" % (gbff_file.split("/")[-1],assembly,locus,locus_tag,old_locus_tag,definition,biosample_out,product,coords, protein_id_out, pseudogene)
                          almost_all_items = re.sub('\n|\s{4,}','',almost_all_items)
                          all_items = "%s\n%s\n" % (almost_all_items, protein_out)
                      else:
-                         almost_all_items = ">%s!!%s!!%s!!%s!!%s!!%s!!%s!!%s!!%s!!%s" % (gbff_file.split("/")[-1],assembly,locus,locus_tag,old_locus_tag,definition,biosample_out,product,coords, protein_id_out)
+                         almost_all_items = ">%s!!%s!!%s!!%s!!%s!!%s!!%s!!%s!!%s!!%s!!%s" % (gbff_file.split("/")[-1],assembly,locus,locus_tag,old_locus_tag,definition,biosample_out,product,coords, protein_id_out, pseudogene)
                          almost_all_items = re.sub('\n|\s{4,}','',almost_all_items)
                          all_items = "%s\n" % (almost_all_items)
                      #all_proteins.add(">"+assembly+'•'+locus+'•'+locus_tag+'•'+biosample+'•'+product+'•'+coords+'•'+protein_id+'\n'+protein+'\n')
@@ -306,7 +311,7 @@ rule parse_blastp:
         import os
         blastout = pd.read_csv("results/blast_output_table.txt", sep='\t', low_memory = False)
         print('Editing blastp output file')
-        blastout[["filename","assembly","accession","locus_tag","old_locus_tag","name","biosample","protein_name","coordinates","protein_id"]] = blastout['stitle'].str.split("!!", expand = True)
+        blastout[["filename","assembly","accession","locus_tag","old_locus_tag","name","biosample","protein_name","coordinates","protein_id","pseudogene"]] = blastout['stitle'].str.split("!!", expand = True)
         blastout['direction']= [-1 if re.match('complement',str(c)) else 1 for c in blastout['coordinates']]
         blastout['join_status'] = [1 if re.match('join',str(c)) else 0 for c in blastout['coordinates']]
         #extracts start and end coordinates from the coordinates column
@@ -389,7 +394,8 @@ rule parse_blastp:
                         #sgi = re.sub("\{|\}|\'","", str(set(df['sgi'])) )
                         cluster_len= max(df['end_coord']) - min(df['start_coord'])
                         number_of_hits = len(df)
-                        list_of_clusters.append([accession, filename, biosample, number_of_hits , cluster_len, synteny, synteny_dir_dist, synteny_dir_pident, synteny_dir, assembly, accession, name, hit_list, old_locus_hit_list, protein_name_list, protein_id_list, query_list, coord_list, cluster_number])
+                        pseudogene_list= list(df['pseudogene'])
+                        list_of_clusters.append([accession, filename, biosample, number_of_hits , cluster_len, synteny, synteny_dir_dist, synteny_dir_pident, synteny_dir, assembly, accession, name, hit_list, old_locus_hit_list, protein_name_list, protein_id_list, pseudogene_list, query_list, coord_list, cluster_number])
                 return(list_of_clusters)
         print('\nParsing filtered blastp output file')
         parse_blastp_input= list(set(blastout_filtered['accession']))
@@ -405,7 +411,7 @@ rule parse_blastp:
         print('\nObtaining iac cluster positive data frame')
         iac_positive = list(filter(None, result_list))
         iac_positive_flat = [item for sublist in iac_positive for item in sublist]
-        iac_positive_df= pd.DataFrame(iac_positive_flat, columns=('genome_acc','filename','biosample', 'hits', 'cluster_length','synteny','synteny_dir_dist','synteny_dir_pident','synteny_dir','assembly','accession','name','hit_list','old_locus_hit_list','protein_name_list','protein_id_list','query_list','coord_list','cluster_number'))
+        iac_positive_df= pd.DataFrame(iac_positive_flat, columns=('genome_acc','filename','biosample', 'hits', 'cluster_length','synteny','synteny_dir_dist','synteny_dir_pident','synteny_dir','assembly','accession','name','hit_list','old_locus_hit_list','protein_name_list','protein_id_list','pseudogene_list','query_list','coord_list','cluster_number'))
         iac_positive_df=iac_positive_df[[len(set(i))>=6 for i in iac_positive_df['synteny'].str.findall('\w')]]
         iac_positive_df['contig'] = iac_positive_df['name'].str.contains('supercont|ctg|node|contig|scaffold|contigs',case=False)
         iac_positive_df['complete_genome']= iac_positive_df['name'].str.contains('complete',case=False)
@@ -441,6 +447,8 @@ rule parse_blastp:
         host_sciname_dict["NA"] = "NA"
         strain_dict={}
         strain_dict["NA"] = "NA"
+        all_meta_dict={}
+        all_meta_dict["NA"]="NA"
         for i in id_batch_str:
             url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=biosample&id=" + i + "&api_key=52553dfd9c090cfba1c3b28a45d8a648fd09"
             print(url)
@@ -486,6 +494,14 @@ rule parse_blastp:
                     strain_dict[bs_acc] = strain[0].text
                 else:
                     strain_dict[bs_acc] = "NA"
+                all_metadata = i.findall('./Attributes/Attribute[@attribute_name]')
+                if all_metadata:
+                    all_metadata_list=[]
+                    for m in all_metadata:
+                        all_metadata_list.append( (m.attrib['attribute_name'], m.text ))
+                    all_meta_dict[bs_acc]= all_metadata_list
+                else:
+                    all_meta_dict[bs_acc] = "NA"
         print(isolation_source_dict)
         iac_positive_df['isolation_src'] = iac_positive_df['biosample'].map(isolation_source_dict)
         iac_positive_df['env_biome'] = iac_positive_df['biosample'].map(env_biome_dict)
@@ -493,6 +509,7 @@ rule parse_blastp:
         iac_positive_df['host'] = iac_positive_df['biosample'].map(host_dict)
         iac_positive_df['host_sciname'] = iac_positive_df['biosample'].map(host_sciname_dict)
         iac_positive_df['strain'] = iac_positive_df['biosample'].map(strain_dict)
+        iac_positive_df['all_biosample_metadata'] = iac_positive_df['biosample'].map(all_meta_dict)
         all_assemblies= ['RS_'+ i for i in list(set(iac_positive_df['assembly']))]
         gtdb_metadata = pd.read_csv('gtdb/bac120_metadata_r89.tsv', sep='\t')
         gtdb_matches= gtdb_metadata[gtdb_metadata['accession'].isin(all_assemblies)]
@@ -530,9 +547,10 @@ rule index_files:
                         out_prots = []
                         for p in proteins:
                             p1 = re.sub('NULL$','NULL!!',p)
-                            p2 = p1.replace('\n','!!',1)
-                            p3 = p2.replace('\n','??')
-                            out_prots.append(p3)
+                            p2 = re.sub('PSEUDOGENE$','PSEUDOGENE!!',p1)
+                            p3 = p2.replace('\n','!!',1)
+                            p4 = p3.replace('\n','??')
+                            out_prots.append(p4)
                     with open(outfilename, 'w+') as outfile:
                         outfile.write('\n'.join(out_prots) + '\n')
                     print('made index for: ' + filename)
@@ -565,7 +583,7 @@ rule fetch_neighborhoods:
             print(assembly_index_file)
             db = pd.read_csv(assembly_index_file, sep = "!!" ,header = None, engine='python')
             #db.columns = ["filename","assembly","accession","locus_tag","old_locus_tag","name","biosample","protein_name","coordinates","protein_id"]
-            db.columns = ["filename","assembly","accession","locus_tag","old_locus_tag","name","biosample","protein_name","coordinates","protein_id","protein_seq"]
+            db.columns = ["filename","assembly","accession","locus_tag","old_locus_tag","name","biosample","protein_name","coordinates","protein_id","pseudogene","protein_seq"]
             db['direction']= [-1 if re.match('complement',c) else 1 for c in db['coordinates']]
             db['start_coord'] = [re.search('\d+?(?=\.\.(\d|\>))',str(c)).group(0) for c in db['coordinates'] ]
             db['start_coord'] = [re.sub('complement|>|<|\)|\(',"",c) for c in db['start_coord'] ]
@@ -585,6 +603,30 @@ rule fetch_neighborhoods:
             neighborhood = genome.loc[start:stop,].copy()
             neighborhood['query_match'] = neighborhood['locus_tag'].map(hit_dict)
             coord_list = list(zip(neighborhood['start_coord'], neighborhood['end_coord'],neighborhood['direction'],neighborhood['query_match']))
+            #function to find GC content of cluster vs genome
+            gbff_str=str(db['filename'][0][1:])
+            with open("gbff_files_unzipped/"+gbff_str) as file:
+                gbff_file = file.read()
+            genome_seq = "".join(re.findall("(?<=ORIGIN)[\s+\S+]+(?=\/\/)",gbff_file))
+            Gg=genome_seq.count("g")
+            Gc=genome_seq.count("c")
+            Ga=genome_seq.count("a")
+            Gt=genome_seq.count("t")
+            genomeGC= (Gg+Gc)/(Gg+Gc+Ga+Gt)
+            start=min(coord_list)[0]
+            end=max(coord_list)[1]
+            regex_str=acc+"[\s+\S+]+\/\/"
+            all_cluster_fasta = re.findall(regex_str,gbff_file)[0]
+            all_cluster_fasta = re.findall("(?<=ORIGIN)[\s+\S+]+(?=\/\/)",all_cluster_fasta)[0]
+            all_cluster_fasta = re.sub(" |\d|\n","",all_cluster_fasta)
+            cluster_seq = all_cluster_fasta[start-1:end-1]
+            g=cluster_seq.count("g")
+            c=cluster_seq.count("c")
+            a=cluster_seq.count("a")
+            t=cluster_seq.count("t")
+            clusterGC = (g+c)/(g+c+a+t)
+            diffGC = abs(clusterGC - genomeGC)
+            ####
             if sum( neighborhood[neighborhood['query_match'].notnull()]['direction'] ) < 0:
                     neighborhood['actual_start_tmp'] = neighborhood['start_coord']
                     neighborhood['start_coord']= neighborhood['end_coord'] * -1
@@ -676,7 +718,7 @@ rule fetch_neighborhoods:
             accession = re.sub("\{|\}|\'","", str(set(neighborhood['accession'])) )
             title= re.sub("\{|\}|\'", "",str(set(neighborhood['name'])) )
             print(assembly_index_file + " successfully used")
-            return([accession, assembly, title, len(neighborhood), cluster_len, synteny, synteny_dir_dist, synteny_dir, cluster_number,coord_list,adj_coord_list,tared_adj_coord_list,itol_diagram_string, nhbrhood_hit_list,nhbrhood_locus_tags,nhbrhood_old_locus_tags,nhbrhood_prot_ids,nhbrhood_prot_name,nhbrhood_prot_seq])
+            return([accession, assembly, title, len(neighborhood), cluster_len, synteny, synteny_dir_dist, synteny_dir, cluster_number,coord_list,adj_coord_list,tared_adj_coord_list,itol_diagram_string, nhbrhood_hit_list,nhbrhood_locus_tags,nhbrhood_old_locus_tags,nhbrhood_prot_ids,nhbrhood_prot_name,nhbrhood_prot_seq, clusterGC, genomeGC,diffGC, cluster_seq])
         iac_positive_df=pd.read_pickle("results/iac_positive_df.pickle")
         inputs_fetchneighborhood = list(range(0,len(iac_positive_df)))
         # pool_fetchneighborhood= mp.Pool(mp.cpu_count()-2)
@@ -688,7 +730,7 @@ rule fetch_neighborhoods:
                 outputs_fetchneighborhood.append(i)
                 pass
         iac_pos_neighborhoods = list(filter(None, outputs_fetchneighborhood))
-        iac_pos_neighborhoods_df= pd.DataFrame(iac_pos_neighborhoods, columns=('accession', 'assembly', 'title', 'feature_count_nhbr', 'cluster_len_nhbr', 'synteny_nhbr', 'synteny_dir_dist_nhbr', 'synteny_dir_nhbr','cluster_number','coord_list','adj_coord_list','tared_adj_coord_list','itol_cluster_string', 'nhbrhood_hit_list','nhbrhood_locus_tags','nhbrhood_old_locus_tags','nhbrhood_prot_ids','nhbrhood_prot_name','nhbrhood_prot_seq'))
+        iac_pos_neighborhoods_df= pd.DataFrame(iac_pos_neighborhoods, columns=('accession', 'assembly', 'title', 'feature_count_nhbr', 'cluster_len_nhbr', 'synteny_nhbr', 'synteny_dir_dist_nhbr', 'synteny_dir_nhbr','cluster_number','coord_list','adj_coord_list','tared_adj_coord_list','itol_cluster_string', 'nhbrhood_hit_list','nhbrhood_locus_tags','nhbrhood_old_locus_tags','nhbrhood_prot_ids','nhbrhood_prot_name','nhbrhood_prot_seq', 'clusterGC', 'genomeGC','diffGC','cluster_seq'))
         iac_pos_neighborhoods_df.to_csv("results/iac_pos_neighborhoods.tsv",sep = '\t', index = False)
         iac_pos_neighborhoods_df.to_pickle("results/iac_pos_neighborhoods.pickle")
         # merge the neighborhoods and iac_positive dataframes
