@@ -37,7 +37,7 @@ sample_names=[re.search("GCF_.+genomic(?=.gbff.gz)?",i.split('/')[-1])[0] for i 
 
 
 
-chunk_size=5000
+chunk_size=5
 fasta_names= ["fasta_files/"+i+"_proteins.fa" for i in sample_names]
 fasta_file_chunks= [fasta_names[i * chunk_size:(i + 1) * chunk_size] for i in range((len(fasta_names) + chunk_size - 1) // chunk_size )]
 combined_fasta_chunks_index=list(range(0,len(fasta_file_chunks)))
@@ -257,13 +257,15 @@ rule make_blastdb:
 
 
 rule make_master_db:
-    input: "fasta_files_combined/all_proteins_combined_"+str(max(combined_fasta_chunks_index))+".fa.psq"
+    input:
+        psqfiles=expand("fasta_files_combined/all_proteins_combined_{db_id}.fa.psq", db_id = combined_fasta_chunks_index ),
+        fastafiles=expand("fasta_files_combined/all_proteins_combined_{db_id}.fa", db_id = combined_fasta_chunks_index )
     output: "fasta_files_combined/all_proteins_combined_master.pal"
     # params:
     #     combined_files_str= " ".join(glob.glob('fasta_files_combined/all_proteins_combined_*.fa'))
     # wildcard_constraints: db_id= '\d+'
     run:
-        combined_files_list = ["fasta_files_combined/all_proteins_combined_"+str(i)+".fa" for i in combined_fasta_chunks_index]
+        combined_files_list = input.fastafiles
         combined_files_str = " ".join(combined_files_list)
         subprocess.call(['blastdb_aliastool','-dblist',combined_files_str,'-dbtype','prot','-out','fasta_files_combined/all_proteins_combined_master','-title','all_proteins_combined_master'])
 
@@ -286,8 +288,8 @@ rule download_gtdb:
     input: "results/blast_output_table.txt"
     output: 'gtdb/bac120_metadata_r89.tsv'
     run:
+        print("downloading gtdb data")
         urllib.request.urlretrieve("https://data.ace.uq.edu.au/public/gtdb/data/releases/release89/89.0/bac120_metadata_r89.tsv",'gtdb/bac120_metadata_r89.tsv')
-
 
 
 rule parse_blastp:
