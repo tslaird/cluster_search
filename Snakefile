@@ -66,7 +66,13 @@ rule all:
          directory("index_files"),
          "results/iac_positive_all_data.xlsx",
          "results/iac_positive_all_data_gtdb.xlsx",
-         "results/iac_positive_all_data_gtdb.tsv"
+         "results/iac_positive_all_data_gtdb.tsv",
+         "results/IacD_analysis/IacD_seqs.fa",
+         "results/IacD_analysis/IacD_seqs.fa.trim.msa",
+         "results/IacD_analysis/IacD_seqs.fa.trim.msa.fasttree.tree",
+         "results/IacD_analysis/IacD_seqs.fa.trim.msa.uncorrected.distmat",
+         "results/IacD_analysis/IacD_seqs.fa.trim.msa.jukes_cantor.distmat",
+         "results/IacD_analysis/IacD_seqs.fa.trim.msa.kimura_protein.distmat"
 
 rule download_gbff_files:
     output: "gbff_files/{sample}.gbff.gz" , "gbff_files/{sample}.gbff.gz_md5checksums.txt"
@@ -748,3 +754,52 @@ rule fetch_neighborhoods:
         iac_positive_all_gtdb.to_pickle("results/iac_positive_all_data_gtdb.pickle")
         iac_positive_all_gtdb.to_csv("results/iac_positive_all_data_gtdb.tsv", sep = '\t', index = False)
         iac_positive_all_gtdb.to_excel("results/iac_positive_all_data_gtdb.xlsx", index = False)
+
+rule fetch_IacD:
+    input: "results/iac_positive_all_data_gtdb.tsv"
+    output: "results/IacD_analysis/IacD_seqs.fa"
+    run:
+        gtdb=pd.read_csv("results/iac_positive_all_data_gtdb.tsv", sep ='\t')
+        protein_seqs=[]
+        protein_info=[]
+        for i in range(len(gtdb['accession'])):
+            #get index of query gene matching iacD
+            indices = [i for i, x in enumerate(ast.literal_eval(gtdb['nhbrhood_hit_list'].iloc[i])) if x == "IacD"]
+            #index = ast.literal_eval(tree_df['query_list'].iloc[i]).index("IacA")
+            for n in range(len(indices)):
+                index = indices[n]
+                protein_seqs.append(ast.literal_eval( re.sub('nan',"'absent'",gtdb['nhbrhood_prot_seq'].iloc[i]))[index])
+                protein_info.append(gtdb['assembly'].iloc[i]+"_"+ast.literal_eval(gtdb['nhbrhood_hit_list'].iloc[i])[index]+"_n"+str(n+1)+"_"+str(gtdb['species_gtdb'].iloc[i])+"_"+ast.literal_eval(re.sub('nan',"'absent'",gtdb['nhbrhood_locus_tags'].iloc[i]))[index]+"_"+ast.literal_eval(re.sub('nan',"'absent'",gtdb['nhbrhood_prot_ids'].iloc[i]))[index])
+        protein_seqs=[re.sub('\?\?','\n',i) for i in protein_seqs]
+        protein_info=[">"+re.sub(' ','_',i) for i in protein_info]
+        protein_info=[re.sub('\.','_',i) for i in protein_info]
+        fasta_out=''
+        for i,j in zip(protein_info,protein_seqs):
+            if re.search('IacD_n1_s__Sphingomonas',i):
+                    pass
+            else:
+                fasta_out+=i+'\n'+j+'\n\n'
+        with open("results/IacD_analysis/IacD_seqs.fa",'w+') as output:
+            output.writelines(fasta_out)
+
+rule tree_iacD:
+    input: "results/IacD_analysis/IacD_seqs.fa"
+    output:
+        "results/IacD_analysis/IacD_seqs.fa.trim.msa",
+        "results/IacD_analysis/IacD_seqs.fa.trim.msa.fasttree.tree"
+    shell:
+        '''muscle -in {input} -out {input}.msa -maxiters 2 && trimal -in {input}.msa -automated1 > {input}.trim.msa && fasttree {input}.trim.msa > {input}.trim.msa.fasttree.tree'''
+
+rule cluster_IacD:
+    input:"results/IacD_analysis/IacD_seqs.fa.trim.msa"
+    conda: "envs/emboss.yml"
+    output:
+        "results/IacD_analysis/IacD_seqs.fa.trim.msa.uncorrected.distmat",
+        "results/IacD_analysis/IacD_seqs.fa.trim.msa.jukes_cantor.distmat",
+        "results/IacD_analysis/IacD_seqs.fa.trim.msa.kimura_protein.distmat"
+    shell:
+        """
+        distmat -protmethod 0 {input} -outfile {input}.uncorrected.distmat
+        distmat -protmethod 1 {input} -outfile {input}.jukes_cantor.distmat
+        distmat -protmethod 2 {input} -outfile {input}.kimura_protein.distmat
+        """
