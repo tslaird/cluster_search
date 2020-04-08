@@ -72,7 +72,13 @@ rule all:
          "results/IacD_analysis/IacD_seqs.fa.trim.msa.fasttree.tree",
          "results/IacD_analysis/IacD_seqs.fa.trim.msa.uncorrected.distmat",
          "results/IacD_analysis/IacD_seqs.fa.trim.msa.jukes_cantor.distmat",
-         "results/IacD_analysis/IacD_seqs.fa.trim.msa.kimura_protein.distmat"
+         "results/IacD_analysis/IacD_seqs.fa.trim.msa.kimura_protein.distmat",
+         "pangenome_analysis/complete_gtdb_genomes-proteins_combined.fasta",
+         "pangenome_analysis/complete_gtdb_genomes-proteins_combined.fasta.cdhit.clstr",
+         "pangenome_analysis/complete_gtdb_genomes-proteins_combined.fasta.cdhit",
+         "pangenome_analysis/complete_gtdb_genomes-proteins_combined.fasta.cdhit.clstr.matrix.csv",
+         "pangenome_analysis/complete_gtdb_genomes-proteins_combined.fasta.cdhit.core_proteins.fasta"
+
 
 rule download_gbff_files:
     output: "gbff_files/{sample}.gbff.gz" , "gbff_files/{sample}.gbff.gz_md5checksums.txt"
@@ -803,3 +809,74 @@ rule cluster_IacD:
         distmat -protmethod 1 {input} -outfile {input}.jukes_cantor.distmat
         distmat -protmethod 2 {input} -outfile {input}.kimura_protein.distmat
         """
+rule make_iac_pan_genome_data:
+    input: "results/iac_positive_all_data_gtdb.pickle"
+    output: "pangenome_analysis/complete_gtdb_genomes-proteins_combined.fasta"
+    run:
+        iac_positive_all_data =pd.read_pickle(str(input))
+        complete_gtdb_genomes=iac_positive_all_data[iac_positive_all_data['complete_genome']==1]['filename']
+        genome_list = ["fasta_files/"+re.sub('.gbff','_proteins.fa', i) for i in list(set(complete_gtdb_genomes))]
+        with open("pangenome_analysis/complete_gtdb_genomes-proteins_combined.fasta", 'w') as outfile:
+            files = genome_list
+            for f in files:
+                    with open(f) as infile:
+                            outfile.write(infile.read())
+
+rule cluster_proteins_cdhit:
+    input: rules.make_iac_pan_genome_data.output
+    output:
+        clusterfile="pangenome_analysis/complete_gtdb_genomes-proteins_combined.fasta.cdhit.clstr",
+        repfile="pangenome_analysis/complete_gtdb_genomes-proteins_combined.fasta.cdhit"
+    shell:
+        '''cd-hit -i {input} -o {input}.cdhit -d 0 -n 4 -c 0.6'''
+
+
+rule parse_cdhit:
+    input:
+        clusterfile=rules.cluster_proteins_cdhit.output.clusterfile,
+        repfile=rules.cluster_proteins_cdhit.output.repfile
+    output:
+        "pangenome_analysis/complete_gtdb_genomes-proteins_combined.fasta.cdhit.clstr.matrix.csv",
+        "pangenome_analysis/complete_gtdb_genomes-proteins_combined.fasta.cdhit.core_proteins.fasta"
+    params:
+        threshold=0.8
+    run:
+        input_file = str(input.clusterfile)
+        with open(input_file) as file:
+            cdhit_clstr=file.read()
+        all_genomes= set(re.findall("(?<=!!)GCF_.+?(?=!!)",cdhit_clstr))
+        all_clusters= cdhit_clstr.split(">Cluster ")[1:]
+        rep_names=[]
+        rep_full_names=[]
+        clstr_tally=[]
+        for cluster in all_clusters:
+                split_cluster= cluster.split("!!")
+                rep_names.append(split_cluster[7]+"_"+split_cluster[9])
+                rep_full_name = cluster.split(", ")[1].split("... ")[0]
+                rep_full_names.append(rep_full_name)
+                genome_tally=[]
+                for genome in all_genomes:
+                    genome_tally.append(cluster.count("!!"+genome+"!!"))
+                clstr_tally.append(genome_tally)
+        clustr_df=pd.DataFrame(data=clstr_tally, index=["Cluster_"+str(i) for i in range(0,len(all_clusters))], columns= all_genomes)
+        clustr_df['freq'] = (clustr_df > 0).sum(axis=1)/len(all_genomes)
+        clustr_df['rep_name'] = rep_names
+        clustr_df['rep_full_name']=rep_full_names
+        clustr_df.to_csv(input_file+".matrix.csv")
+        sum(clustr_df['freq'] >0.8)/ len(clustr_df['freq'])
+        core_threshold=params.threshold
+        rep_input_file =str(input.repfile)
+        with open(rep_input_file) as file:
+            rep_proteins=file.read()
+        core_rep_proteins=list(clustr_df[clustr_df['freq']>0.8]['rep_full_name'])
+        rep_proteins_split=rep_proteins.split('\n\n')[:-1]
+        all_prots=[]
+        all_seqs=[]
+        for i in rep_proteins_split:
+            all_prots.append(i.split("\n",1)[0])
+            all_seqs.append(i.split("\n",1)[1])
+        from itertools import compress
+        bool_index=[i in core_rep_proteins for i in all_prots]
+        core_fasta="\n\n".join(list(compress(rep_proteins_split, bool_index)))+"\n"
+        with open(rep_input_file+".core_proteins"+".fasta","w+") as outfile:
+            outfile.write(core_fasta)
