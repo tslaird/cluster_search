@@ -73,6 +73,12 @@ rule all:
          "results/IacD_analysis/IacD_seqs.fa.trim.msa.uncorrected.distmat",
          "results/IacD_analysis/IacD_seqs.fa.trim.msa.jukes_cantor.distmat",
          "results/IacD_analysis/IacD_seqs.fa.trim.msa.kimura_protein.distmat",
+         "results/IacD_analysis/RecA_seqs.fa",
+         "results/IacD_analysis/RecA_seqs.fa.trim.msa",
+         "results/IacD_analysis/RecA_seqs.fa.trim.msa.fasttree.tree",
+         "results/IacD_analysis/RecA_seqs.fa.trim.msa.uncorrected.distmat",
+         "results/IacD_analysis/RecA_seqs.fa.trim.msa.jukes_cantor.distmat",
+         "results/IacD_analysis/RecA_seqs.fa.trim.msa.kimura_protein.distmat",
          "pangenome_analysis/complete_gtdb_genomes-proteins_combined.fasta",
          "pangenome_analysis/complete_gtdb_genomes-proteins_combined.fasta.cdhit.clstr",
          "pangenome_analysis/complete_gtdb_genomes-proteins_combined.fasta.cdhit",
@@ -265,8 +271,6 @@ rule make_blastdb:
         "fasta_files_combined/all_proteins_combined_{db_id}.fa.pin",
         "fasta_files_combined/all_proteins_combined_{db_id}.fa.psq",
     shell:''' makeblastdb -in {input.file} -dbtype prot'''
-
-
 
 rule make_master_db:
     input:
@@ -809,6 +813,108 @@ rule cluster_IacD:
         distmat -protmethod 1 {input} -outfile {input}.jukes_cantor.distmat
         distmat -protmethod 2 {input} -outfile {input}.kimura_protein.distmat
         """
+
+rule fetch_RecA:
+    input: "results/iac_positive_all_data_gtdb.pickle"
+    output: "results/IacD_analysis/RecA_seqs.fa"
+    run:
+        import multiprocessing as mp
+        def levenshtein(s, t):
+            rows = len(s)+1
+            cols = len(t)+1
+            dist = [[0 for x in range(cols)] for x in range(rows)]
+            # source prefixes can be transformed into empty strings
+            # by deletions:
+            for i in range(1, rows):
+                dist[i][0] = i
+            # target prefixes can be created from an empty source string
+            # by inserting the characters
+            for i in range(1, cols):
+                dist[0][i] = i
+
+            for col in range(1, cols):
+                for row in range(1, rows):
+                    if s[row-1] == t[col-1]:
+                        cost = 0
+                    else:
+                        cost = 1
+                    dist[row][col] = min(dist[row-1][col] + 1,      # deletion
+                                         dist[row][col-1] + 1,      # insertion
+                                         dist[row-1][col-1] + cost) # substitution
+            #for r in range(rows):
+                #print(dist[r])
+            return(dist[row][col])
+        def fetch_recA(filename):
+            all_seqs=[]
+            prot_df = pd.read_csv(filename, sep = "!!" ,header = None, engine='python')
+            prot_df.columns = ["filename","assembly","accession","locus_tag","old_locus_tag","name","biosample","protein_name","coordinates","protein_id","pseudogene","protein_seq"]
+            # add length
+            prot_df['length']=[len(re.sub('\n','',str(i))) for i in prot_df['protein_seq']]
+            #filter by name and size
+            #prot_df_filtered= prot_df[(prot_df['protein_name'].str.contains('DNA recombination\/repair protein RecA|recombinase A|recombinase RecA')) & (prot_df['length']>=200) & (prot_df['length']<=400) ]
+            prot_df_filtered= prot_df[(prot_df['protein_name'].str.contains('DNA_recombination\/repair_protein_RecA|recombinase_A|recombinase_RecA')) & (prot_df['length']>=200) ]
+            if len(prot_df_filtered)==1:
+                for index, row in prot_df_filtered.iterrows():
+                    sequence= str(row['protein_seq'])
+                    sequence= re.sub('\?\?','\n',sequence)
+                    fasta_entry='>'+'_'.join([str(row['assembly']),str(row['accession']),str(row['locus_tag']),str(row['name']),str(row['biosample']),str(row['protein_name']),str(row['protein_id'])])+'\n'+str(sequence)
+                    fasta_entry=re.sub(" |;|:|-|,|\[|\]|\.|\*|\(|\)|\/","_",str(fasta_entry))
+                    fasta_entry=re.sub("__|___","_",fasta_entry)
+                    all_seqs.append(fasta_entry)
+                    print('fetched recA from: ' + filename)
+            if len(prot_df_filtered)>1:
+                distances=[]
+                entries=[]
+                Ec_recA='MAIDENKQKALAAALGQIEKQFGKGSIMRLGEDRSMDVETISTGSLSLDIALGAGGLPMGRIVEIYGPESSGKTTLTLQVIAAAQREGKTCAFIDAEHALDPIYARKLGVDIDNLLCSQPDTGEQALEICDALARSGAVDVIVVDSVAALTPKAEIEGEIGDSHMGLAARMMSQAMRKLAGNLKQSNTLLIFINQIRMKIGVMFGNPETTTGGNALKFYASVRLDIRRIGAVKEGENVVGSETRVKVVKNKIAAPFKQAEFQILYGEGINFYGELVDLGVKEKLIEKAGAWYSYKGEKIGQGKANATAWLKDNPETAKEIEKKVRELLLSNPNSTPDFSVDDSEGVAETNEDF'
+                for index, row in prot_df_filtered.iterrows():
+                    sequence= str(row['protein_seq'])
+                    sequence= re.sub('\?\?','\n',sequence)
+                    sequence_str= re.sub('\n','',sequence)
+                    distances.append(levenshtein(sequence_str, Ec_recA))
+                    fasta_entry='>'+'_'.join([str(row['assembly']),str(row['accession']),str(row['locus_tag']),str(row['name']),str(row['biosample']),str(row['protein_name']),str(row['protein_id'])])+'\n'+str(sequence)
+                    fasta_entry=re.sub(" |;|:|-|,|\[|\]|\.|\*|\(|\)|\/","_",str(fasta_entry))
+                    fasta_entry=re.sub("__|___","_",fasta_entry)
+                    entries.append(fasta_entry)
+                print(entries[distances.index(min(distances))])
+                all_seqs.append(entries[distances.index(min(distances))])
+                print('fetched recA from: ' + filename)
+            return(all_seqs)
+
+        iac_positive_all_data_gtdb= pd.read_pickle("results/iac_positive_all_data_gtdb.pickle")
+        inputs_fetch_recA = [re.sub('.gbff','_proteins.fa.indexprot', i) for i in set(list("index_files/"+iac_positive_all_data_gtdb['filename']))]
+        print(inputs_fetch_recA)
+        all_RecA_list=[]
+        print(all_RecA_list)
+        for i in inputs_fetch_recA:
+            all_RecA_list.append(fetch_recA(i)[0])
+        all_RecA_list=[x for x in all_RecA_list if x]
+        all_RecA_str= '\n\n'.join(all_RecA_list) + '\n'
+        with open('results/IacD_analysis/RecA_seqs.fa','w+') as file:
+            file.writelines(all_RecA_str)
+
+rule tree_RecA:
+    input: "results/IacD_analysis/RecA_seqs.fa"
+    output:
+        "results/IacD_analysis/RecA_seqs.fa.trim.msa",
+        "results/IacD_analysis/RecA_seqs.fa.trim.msa.fasttree.tree"
+    shell:
+        '''muscle -in {input} -out {input}.msa -maxiters 2 && trimal -in {input}.msa -automated1 > {input}.trim.msa && fasttree {input}.trim.msa > {input}.trim.msa.fasttree.tree'''
+
+rule cluster_RecA:
+    input:"results/IacD_analysis/RecA_seqs.fa.trim.msa"
+    conda: "envs/emboss.yml"
+    output:
+        "results/IacD_analysis/RecA_seqs.fa.trim.msa.uncorrected.distmat",
+        "results/IacD_analysis/RecA_seqs.fa.trim.msa.jukes_cantor.distmat",
+        "results/IacD_analysis/RecA_seqs.fa.trim.msa.kimura_protein.distmat"
+    shell:
+        """
+        distmat -protmethod 0 {input} -outfile {input}.uncorrected.distmat
+        distmat -protmethod 1 {input} -outfile {input}.jukes_cantor.distmat
+        distmat -protmethod 2 {input} -outfile {input}.kimura_protein.distmat
+        """
+
+
 rule make_iac_pan_genome_data:
     input: "results/iac_positive_all_data_gtdb.pickle"
     output: "pangenome_analysis/complete_gtdb_genomes-proteins_combined.fasta"
@@ -829,7 +935,6 @@ rule cluster_proteins_cdhit:
         repfile="pangenome_analysis/complete_gtdb_genomes-proteins_combined.fasta.cdhit"
     shell:
         '''cd-hit -i {input} -o {input}.cdhit -d 0 -n 4 -c 0.6'''
-
 
 rule parse_cdhit:
     input:
