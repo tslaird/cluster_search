@@ -25,9 +25,9 @@ if os.path.exists('assembly_summary_filtered.txt'):
     assembly_summary_filtered= pd.read_csv("assembly_summary_filtered.txt", sep='\t')
 else:
     assembly_summary = pd.read_csv('assembly_summary.txt', sep = '\t', low_memory = False, skiprows=[0])
-    assembly_summary_filtered = assembly_summary[((assembly_summary['assembly_level'] == 'Complete Genome') & (assembly_summary['version_status']=='latest') & assembly_summary['organism_name'].str.contains('Pseudomonas putida'))]
+    #assembly_summary_filtered = assembly_summary[((assembly_summary['assembly_level'] == 'Complete Genome') & (assembly_summary['version_status']=='latest') & assembly_summary['organism_name'].str.contains('Pseudomonas putida'))]
+    assembly_summary_filtered = assembly_summary[(assembly_summary['version_status']=='latest')]
     assembly_summary_filtered.to_csv("assembly_summary_filtered.txt", sep='\t')
-#assembly_summary_filtered = assembly_summary[(assembly_summary['version_status']=='latest')]
 all_paths = assembly_summary_filtered['ftp_path']+ "/"+[i.split('/')[-1] for i in assembly_summary_filtered['ftp_path']] + \
     "_genomic.gbff.gz"
 all_paths.to_csv("ftp_paths.txt", index=False)
@@ -36,14 +36,10 @@ sample_names_df.to_csv("sample_names.txt", sep='\t', index=False, header=False)
 sample_names=[re.search("GCF_.+genomic(?=.gbff.gz)?",i.split('/')[-1])[0] for i in all_paths]
 
 
-
-chunk_size=5
+chunk_size=500
 fasta_names= ["fasta_files/"+i+"_proteins.fa" for i in sample_names]
 fasta_file_chunks= [fasta_names[i * chunk_size:(i + 1) * chunk_size] for i in range((len(fasta_names) + chunk_size - 1) // chunk_size )]
 combined_fasta_chunks_index=list(range(0,len(fasta_file_chunks)))
-
-
-
 
 download_dict= dict(zip(sample_names, all_paths))
 
