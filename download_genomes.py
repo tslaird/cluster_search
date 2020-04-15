@@ -19,8 +19,8 @@ if os.path.exists('assembly_summary_filtered.txt'):
     assembly_summary_filtered= pd.read_csv("assembly_summary_filtered.txt", sep='\t')
 else:
     assembly_summary = pd.read_csv('assembly_summary.txt', sep = '\t', low_memory = False, skiprows=[0])
-    assembly_summary_filtered = assembly_summary[((assembly_summary['assembly_level'] == 'Complete Genome') & (assembly_summary['version_status']=='latest') & assembly_summary['organism_name'].str.contains('Pseudomonas putida'))]
-    #assembly_summary_filtered = assembly_summary[(assembly_summary['version_status']=='latest')]
+    #assembly_summary_filtered = assembly_summary[((assembly_summary['assembly_level'] == 'Complete Genome') & (assembly_summary['version_status']=='latest') & assembly_summary['organism_name'].str.contains('Pseudomonas putida'))]
+    assembly_summary_filtered = assembly_summary[(assembly_summary['version_status']=='latest')]
     assembly_summary_filtered.to_csv("assembly_summary_filtered.txt", sep='\t')
 all_paths = assembly_summary_filtered['ftp_path']+ "/"+[i.split('/')[-1] for i in assembly_summary_filtered['ftp_path']] + \
     "_genomic.gbff.gz"
@@ -29,25 +29,31 @@ sample_names_df=pd.DataFrame([re.search("GCF_.+genomic(?=.gbff.gz)?",i.split('/'
 sample_names_df.to_csv("sample_names.txt", sep='\t', index=False, header=False)
 sample_names=[re.search("GCF_.+genomic(?=.gbff.gz)?",i.split('/')[-1])[0] for i in all_paths]
 output_gbff_names= ['gbff_files/'+i.split('/')[-1] for i in all_paths]
+output_gbff_unzip_names= ['gbff_files_unzipped/'+i.split('/')[-1][0:-3] for i in all_paths]
 download_dict= dict(zip(output_gbff_names, all_paths))
 
-chunk_size=500
-fasta_names= ["fasta_files/"+i+"_proteins.fa" for i in sample_names]
-fasta_file_chunks= [fasta_names[i * chunk_size:(i + 1) * chunk_size] for i in range((len(fasta_names) + chunk_size - 1) // chunk_size )]
-combined_fasta_chunks_index=list(range(0,len(fasta_file_chunks)))
-
+# chunk_size=500
+# fasta_names= ["fasta_files/"+i+"_proteins.fa" for i in sample_names]
+# fasta_file_chunks= [fasta_names[i * chunk_size:(i + 1) * chunk_size] for i in range((len(fasta_names) + chunk_size - 1) // chunk_size )]
+# combined_fasta_chunks_index=list(range(0,len(fasta_file_chunks)))
 
 number_of_cpus = psutil.cpu_count()
 print("using "+str(number_of_cpus)+" cpus")
 
-def fetch_gbff_files(path, retries=100, unzip=True):
+def fetch_gbff_files(path, retries=5, unzip=True, redownload=True):
     name = 'gbff_files/'+path.split('/')[-1]
+    output_name = 'gbff_files_unzipped/'+name.split('/')[1][:-3]
     md5path= path.rsplit('/',1)[0]+"/md5checksums.txt"
     md5name= 'gbff_files/'+path.split('/')[-1]+"_md5checksums.txt"
-    #print(md5path)
-    #print(md5name)
-    if os.path.exists(name):
-        print(name + " already downloaded")
+    if os.path.exists(name) and os.path.exists(md5name) and redownload==False:
+        with open(name, 'rb') as file_to_check:
+            data = file_to_check.read()
+            md5_returned = str(hashlib.md5(data).hexdigest())
+        with open(md5name,'r') as md5_file:
+            md5_file_text=md5_file.read()
+            md5_sum=str(re.findall('\w+(?=\s\s.+gbff.gz)',md5_file_text)[0])
+            if md5_returned==md5_sum:
+                print(name + " already downloaded")
     else:
         while(retries >= 1):
             try:
@@ -62,24 +68,39 @@ def fetch_gbff_files(path, retries=100, unzip=True):
                     print(md5_returned+" : "+md5_sum)
                     if md5_returned==md5_sum:
                         print("Fetched " + name)
+                        if unzip ==True:
+                            f = gzip.open(name, 'rb')
+                            file_content = f.read()
+                            f.close()
+                            print('Unzipping '+ name)
+                            output = open(output_name, 'wb')
+                            output.write(file_content)
+                            output.close()
+                            print("Done unzipping "+ name)
                         break
             except:
                 print("Retrying download from " + path)
                 retries = retries - 1
                 continue
-    if unzip ==True:
-        output_name = 'gbff_files_unzipped/'+name.split('/')[1].split('.gz')[0]
-        if os.path.exists(output_name):
-            print(name + " already unzipped")
+        if not os.path.exists(name) and not os.path.exists(md5name):
+            print("Failed downloading "+ path)
         else:
-            f = gzip.open(name, 'rb')
-            file_content = f.read()
-            f.close()
-            print('Unzipping '+ name)
-            output = open(output_name, 'wb')
-            output.write(file_content)
-            output.close()
-            print("Done unzipping "+ name)
+            return
+
+def unzip_file(name):
+    output_name = 'gbff_files_unzipped/'+name.split('/')[1].split('.gz')[0]
+    if os.path.exists(output_name):
+        print(name + " already unzipped")
+    else:
+        f = gzip.open(name, 'rb')
+        file_content = f.read()
+        f.close()
+        print('Unzipping '+ name)
+        output = open(output_name, 'wb')
+        output.write(file_content)
+        output.close()
+        print("Done unzipping "+ name)
+
 
 if os.path.exists("gbff_files"):
     pass
@@ -95,10 +116,10 @@ with concurrent.futures.ThreadPoolExecutor(max_workers=number_of_cpus) as execut
     for _ in executor.map(fetch_gbff_files, all_paths):
         pass
 
-gbff_files_dir=glob.glob("gbff_files/*gz")
+gbff_files_dir=glob.glob("gbff_files/*gbff.gz")
 print(str(len(gbff_files_dir))+ " gbff.gz files in gbff_files directory")
 
-gbff_files_unzip_dir=glob.glob("gbff_files_unzipped/*gbff")
+gbff_files_unzip_dir=glob.glob("gbff_files_unzipped/*.gbff")
 print(str(len(gbff_files_unzip_dir))+ " gbff files in gbff_files_unzipped directory")
 
 files_not_fetched=list(set(output_gbff_names)- set(gbff_files_dir))
@@ -115,3 +136,9 @@ if len(files_not_fetched) >0:
 
 else:
     print("All files fetched")
+
+files_not_unzipped= ["gbff_files/"+i.split("/")[-1]+".gz" for i in list(set(output_gbff_unzip_names)- set(gbff_files_unzip_dir))]
+
+with concurrent.futures.ThreadPoolExecutor(max_workers=number_of_cpus) as executor:
+    for _ in executor.map(fetch_gbff_files,[download_dict[i] for i in files_not_unzipped]):
+        pass

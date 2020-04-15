@@ -95,27 +95,23 @@ def gbff2protein(gbff_file):
 number_of_cpus = psutil.cpu_count()
 print("using "+str(number_of_cpus)+" cpus")
 
-
-if os.path.exists("fasta_files"):
-    pass
-else:
+if not os.path.exists("fasta_files"):
     os.mkdir("fasta_files")
 
-
 gbff_inputs = glob.glob('gbff_files_unzipped/*.gbff')
+print("Will process "+str(len(gbff_inputs))+" gbff files")
 
-with concurrent.futures.ThreadPoolExecutor(max_workers=number_of_cpus) as executor:
-    for _ in executor.map(gbff2protein,gbff_inputs ):
+with concurrent.futures.ProcessPoolExecutor(max_workers=number_of_cpus*2) as executor:
+    for _ in executor.map(gbff2protein,gbff_inputs):
         pass
 
 fasta_files_dir=glob.glob("fasta_files/*fa")
-
 print(str(len(fasta_files_dir))+ " fasta files in fasta_files directory")
 
 output_names=[re.sub("gbff_files_unzipped","fasta_files",i) for i in gbff_inputs]
 output_names=[re.sub('.gbk|.gbff','_proteins.fa', i) for i in output_names]
 
-files_not_converted=list(set(output_names)- set(fasta_files_dir))
+files_not_converted=list(set(output_names)-set(fasta_files_dir))
 
 if len(files_not_converted) >0:
     print(str(len(files_not_converted))+" files were not converted")
