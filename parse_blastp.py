@@ -6,14 +6,23 @@ from io import BytesIO
 import time
 import xml.etree.ElementTree as ET
 import numpy as np
-import multiprocessing as mp
+import concurrent.futures
 import glob
 import os
+from sourmash import MinHash
+
+
 
 #ncbi key needed for fetching metadata
 ncbi_api_key="52553dfd9c090cfba1c3b28a45d8a648fd09"
-
+#define output director and include forward slash
+output_directory='results_test/'
 #defining the functions
+
+dna_tab = str.maketrans("actg", "tgac")
+def complement(seq):
+    return seq.translate(dna_tab)
+
 def parseblastout2(accession):
     print("parsing proteins from: "+ accession )
     genome_match= blastout_filtered[blastout_filtered['accession'] ==accession]
@@ -126,7 +135,8 @@ def fetchneighborhood2(index,features_upstream = 0,features_downstream = 0):
     gbff_str=str(db['filename'][0][1:])
     with open("gbff_files_unzipped/"+gbff_str) as file:
         gbff_file = file.read()
-    genome_seq = "".join(re.findall("(?<=ORIGIN)[\s+\S+]+(?=\/\/)",gbff_file))
+    genome_seq = "".join(re.findall("(?<=ORIGIN)[\s+\S+]+?(?=\/\/)",gbff_file))
+    genome_seq = re.sub('\s|\d|\n','',genome_seq)
     Gg=genome_seq.count("g")
     Gc=genome_seq.count("c")
     Ga=genome_seq.count("a")
@@ -145,6 +155,26 @@ def fetchneighborhood2(index,features_upstream = 0,features_downstream = 0):
     t=cluster_seq.count("t")
     clusterGC = (g+c)/(g+c+a+t)
     diffGC = abs(clusterGC - genomeGC)
+    #compare minhash values between cluster and genome
+    kmer_size=7
+    n=0
+    sc=1
+    cluster_minhash= MinHash(n=n, ksize=kmer_size,scaled=sc)
+    cluster_minhash.add_sequence(cluster_seq)
+    cluster_minhash.add_sequence(complement(cluster_seq))
+    #
+    genome_minhash= MinHash(n=n, ksize=kmer_size,scaled=sc)
+    genome_minhash.add_sequence(genome_seq)
+    genome_minhash.add_sequence(complement(genome_seq))
+    #
+    genome_minus_cluster=re.sub(cluster_seq,'',genome_seq)
+    print(len(genome_seq)-len(genome_minus_cluster))
+    genome_minus_cluster_minhash=MinHash(n=n, ksize=kmer_size,scaled=sc)
+    genome_minus_cluster_minhash.add_sequence(genome_minus_cluster)
+    genome_minus_cluster_minhash.add_sequence(complement(genome_minus_cluster))
+    minhash_sim=cluster_minhash.similarity(genome_minhash)
+    minhash_sim_minus_cluster=cluster_minhash.similarity(genome_minus_cluster_minhash)
+    print(minhash_sim)
     ####
     if sum( neighborhood[neighborhood['query_match'].notnull()]['direction'] ) < 0:
             neighborhood['actual_start_tmp'] = neighborhood['start_coord']
@@ -237,12 +267,12 @@ def fetchneighborhood2(index,features_upstream = 0,features_downstream = 0):
     accession = re.sub("\{|\}|\'","", str(set(neighborhood['accession'])) )
     title= re.sub("\{|\}|\'", "",str(set(neighborhood['name'])) )
     print(assembly_index_file + " successfully used")
-    return([accession, assembly, title, len(neighborhood), cluster_len, synteny, synteny_dir_dist, synteny_dir, cluster_number,coord_list,adj_coord_list,tared_adj_coord_list,itol_diagram_string, nhbrhood_hit_list,nhbrhood_locus_tags,nhbrhood_old_locus_tags,nhbrhood_prot_ids,nhbrhood_prot_name,nhbrhood_prot_seq, clusterGC, genomeGC,diffGC, cluster_seq])
+    return([accession, assembly, title, len(neighborhood), cluster_len, synteny, synteny_dir_dist, synteny_dir, cluster_number,coord_list,adj_coord_list,tared_adj_coord_list,itol_diagram_string, nhbrhood_hit_list,nhbrhood_locus_tags,nhbrhood_old_locus_tags,nhbrhood_prot_ids,nhbrhood_prot_name,nhbrhood_prot_seq, clusterGC, genomeGC,diffGC,minhash_sim, minhash_sim_minus_cluster, cluster_seq])
 
 ###running the functions
 
-if not os.path.exists("results/iac_positive_df.pickle"):
-    blastout = pd.read_csv("results/blast_output_table.txt", sep='\t', low_memory = False)
+if not os.path.exists(output_directory+"iac_positive_df.pickle"):
+    blastout = pd.read_csv(output_directory+"blast_output_table.txt", sep='\t', low_memory = False)
     print('Editing blastp output file')
     blastout[["filename","assembly","accession","locus_tag","old_locus_tag","name","biosample","protein_name","coordinates","protein_id","pseudogene"]] = blastout['stitle'].str.split("!!", expand = True)
     blastout['direction']= [-1 if re.match('complement',str(c)) else 1 for c in blastout['coordinates']]
@@ -266,7 +296,7 @@ if not os.path.exists("results/iac_positive_df.pickle"):
         total_count = len(blastout[blastout['qseqid']== i])
         raw_blast_stats.append('Genomes with homologue to '+i+" "+str(genome_count)+"\n")
         raw_blast_stats.append('Total homologue count for '+i+" "+str(total_count)+"\n")
-    with open("results/raw_blast_stats.txt", 'w') as f:
+    with open(output_directory+"raw_blast_stats.txt", 'w') as f:
         f.writelines(raw_blast_stats)
     filtered_blast_stats=[]
     for i in iac_proteins:
@@ -274,7 +304,7 @@ if not os.path.exists("results/iac_positive_df.pickle"):
         total_count = len(blastout_filtered[blastout_filtered['qseqid']== i])
         filtered_blast_stats.append('Genomes with homologue to '+i+" "+str(genome_count)+"\n")
         filtered_blast_stats.append('Total homologue count for '+i+" "+str(total_count)+"\n")
-    with open("results/filtered_blast_stats.txt", 'w') as f:
+    with open(output_directory+"filtered_blast_stats.txt", 'w') as f:
         f.writelines(filtered_blast_stats)
 
     print('\nParsing filtered blastp output file')
@@ -300,7 +330,7 @@ if not os.path.exists("results/iac_positive_df.pickle"):
     iac_positive_df['duplicated']= iac_positive_df.duplicated(subset="filename")
     print('Writing positive accessions to file')
     assembly_list = "\n".join(list(set(iac_positive_df['assembly']))) + "\n"
-    with open("results/iac_positive_accessions.txt",'w+') as output:
+    with open(output_directory+"iac_positive_accessions.txt",'w+') as output:
         output.writelines(assembly_list)
     print('Fetching genome metadata')
     all_accs=list(set(iac_positive_df['accession']))
@@ -402,13 +432,13 @@ if not os.path.exists("results/iac_positive_df.pickle"):
     iac_positive_df['same_taxonomy'] = iac_positive_df['gtdb_tax'] == iac_positive_df['ncbi_tax']
     iac_positive_df[['domain_gtdb','phylum_gtdb','class_gtdb','order_gtdb','family_gtdb','genus_gtdb','species_gtdb']]=iac_positive_df['gtdb_tax'].str.split(";", expand = True)
     print('\nWriting iac cluster positive data frame to file')
-    iac_positive_df.to_csv("results/iac_positive_df.tsv",sep = '\t', index = False)
-    iac_positive_df.to_pickle("results/iac_positive_df.pickle")
+    iac_positive_df.to_csv(output_directory+"iac_positive_df.tsv",sep = '\t', index = False)
+    iac_positive_df.to_pickle(output_directory+"iac_positive_df.pickle")
 
-iac_positive_df=pd.read_pickle("results/iac_positive_df.pickle")
+iac_positive_df=pd.read_pickle(output_directory+"iac_positive_df.pickle")
 inputs_indexprot = [re.sub('.gbff','_proteins.fa', i) for i in list(set(iac_positive_df['filename']))]
 
-if not os.exists("index_files")
+if not os.path.exists("index_files"):
     os.mkdir("index_files")
 
 with concurrent.futures.ThreadPoolExecutor(max_workers=None) as executor:
@@ -428,22 +458,22 @@ with concurrent.futures.ProcessPoolExecutor(max_workers=None) as executor:
         pass
 
 iac_pos_neighborhoods = list(filter(None, outputs_fetchneighborhood))
-iac_pos_neighborhoods_df= pd.DataFrame(iac_pos_neighborhoods, columns=('accession', 'assembly', 'title', 'feature_count_nhbr', 'cluster_len_nhbr', 'synteny_nhbr', 'synteny_dir_dist_nhbr', 'synteny_dir_nhbr','cluster_number','coord_list','adj_coord_list','tared_adj_coord_list','itol_cluster_string', 'nhbrhood_hit_list','nhbrhood_locus_tags','nhbrhood_old_locus_tags','nhbrhood_prot_ids','nhbrhood_prot_name','nhbrhood_prot_seq', 'clusterGC', 'genomeGC','diffGC','cluster_seq'))
-iac_pos_neighborhoods_df.to_csv("results/iac_pos_neighborhoods.tsv",sep = '\t', index = False)
-iac_pos_neighborhoods_df.to_pickle("results/iac_pos_neighborhoods.pickle")
+iac_pos_neighborhoods_df= pd.DataFrame(iac_pos_neighborhoods, columns=('accession', 'assembly', 'title', 'feature_count_nhbr', 'cluster_len_nhbr', 'synteny_nhbr', 'synteny_dir_dist_nhbr', 'synteny_dir_nhbr','cluster_number','coord_list','adj_coord_list','tared_adj_coord_list','itol_cluster_string', 'nhbrhood_hit_list','nhbrhood_locus_tags','nhbrhood_old_locus_tags','nhbrhood_prot_ids','nhbrhood_prot_name','nhbrhood_prot_seq', 'clusterGC', 'genomeGC','diffGC','minhash_similarity','minhash_similarity2','cluster_seq'))
+iac_pos_neighborhoods_df.to_csv(output_directory+"iac_pos_neighborhoods.tsv",sep = '\t', index = False)
+iac_pos_neighborhoods_df.to_pickle(output_directory+"iac_pos_neighborhoods.pickle")
 # merge the neighborhoods and iac_positive dataframes
 print('\nMerging all data and writing it to file')
-iac_positive_df = pd.read_pickle("results/iac_positive_df.pickle")
-iac_pos_neighborhoods_df = pd.read_pickle("results/iac_pos_neighborhoods.pickle")
+iac_positive_df = pd.read_pickle(output_directory+"iac_positive_df.pickle")
+iac_pos_neighborhoods_df = pd.read_pickle(output_directory+"iac_pos_neighborhoods.pickle")
 iac_positive_all = pd.merge(iac_pos_neighborhoods_df,iac_positive_df, on = ["accession","cluster_number","assembly"])
 iac_positive_all = iac_positive_all.rename(columns={"coord_list_y": "coord_list"}).drop(columns=['coord_list_x'])
 iac_positive_all_gtdb= iac_positive_all[iac_positive_all['gtdb_tax'].notnull()]
-iac_positive_all.to_pickle("results/iac_positive_all_data.pickle")
-iac_positive_all.to_csv("results/iac_positive_all_data.tsv", sep = '\t', index = False)
-iac_positive_all.to_excel("results/iac_positive_all_data.xlsx", index = False)
-iac_positive_all_gtdb.to_pickle("results/iac_positive_all_data_gtdb.pickle")
-iac_positive_all_gtdb.to_csv("results/iac_positive_all_data_gtdb.tsv", sep = '\t', index = False)
-iac_positive_all_gtdb.to_excel("results/iac_positive_all_data_gtdb.xlsx", index = False)
+iac_positive_all.to_pickle(output_directory+"iac_positive_all_data.pickle")
+iac_positive_all.to_csv(output_directory+"iac_positive_all_data.tsv", sep = '\t', index = False)
+iac_positive_all.to_excel(output_directory+"iac_positive_all_data.xlsx", index = False)
+iac_positive_all_gtdb.to_pickle(output_directory+"iac_positive_all_data_gtdb.pickle")
+iac_positive_all_gtdb.to_csv(output_directory+"iac_positive_all_data_gtdb.tsv", sep = '\t', index = False)
+iac_positive_all_gtdb.to_excel(output_directory+"iac_positive_all_data_gtdb.xlsx", index = False)
 
 
 #get 10 neighbors on each side:
@@ -455,25 +485,24 @@ def helper_fetchneighborhood2(index):
     return fetchneighborhood2(index,features_upstream = 10,features_downstream = 10)
 
 with concurrent.futures.ProcessPoolExecutor(max_workers=None) as executor:
-    for i in executor.map(fetchneighborhood2, inputs_fetchneighborhood_10_10):
+    for i in executor.map(helper_fetchneighborhood2, inputs_fetchneighborhood_10_10):
         outputs_fetchneighborhood_10_10.append(i)
         pass
 
 iac_pos_neighborhoods_10_10 = list(filter(None, outputs_fetchneighborhood_10_10))
-iac_pos_neighborhoods_df_10_10= pd.DataFrame(iac_pos_neighborhoods_10_10, columns=('accession', 'assembly', 'title', 'feature_count_nhbr', 'cluster_len_nhbr', 'synteny_nhbr', 'synteny_dir_dist_nhbr', 'synteny_dir_nhbr','cluster_number','coord_list','adj_coord_list','tared_adj_coord_list','itol_cluster_string', 'nhbrhood_hit_list','nhbrhood_locus_tags','nhbrhood_old_locus_tags','nhbrhood_prot_ids','nhbrhood_prot_name','nhbrhood_prot_seq', 'clusterGC', 'genomeGC','diffGC','cluster_seq'))
-iac_pos_neighborhoods_df_10_10.to_csv("results/iac_pos_neighborhoods_10_10.tsv",sep = '\t', index = False)
-iac_pos_neighborhoods_df_10_10.to_pickle("results/iac_pos_neighborhoods_10_10.pickle")
-iac_pos_neighborhoods_df_10_10 = pd.read_pickle("results/iac_pos_neighborhoods_10_10.pickle")
+iac_pos_neighborhoods_df_10_10= pd.DataFrame(iac_pos_neighborhoods_10_10, columns=('accession', 'assembly', 'title', 'feature_count_nhbr', 'cluster_len_nhbr', 'synteny_nhbr', 'synteny_dir_dist_nhbr', 'synteny_dir_nhbr','cluster_number','coord_list','adj_coord_list','tared_adj_coord_list','itol_cluster_string', 'nhbrhood_hit_list','nhbrhood_locus_tags','nhbrhood_old_locus_tags','nhbrhood_prot_ids','nhbrhood_prot_name','nhbrhood_prot_seq', 'clusterGC','genomeGC','diffGC','minhash_similarity','minhash_similarity2','cluster_seq'))
+iac_pos_neighborhoods_df_10_10.to_csv(output_directory+"iac_pos_neighborhoods_10_10.tsv",sep = '\t', index = False)
+iac_pos_neighborhoods_df_10_10.to_pickle(output_directory+"iac_pos_neighborhoods_10_10.pickle")
+iac_pos_neighborhoods_df_10_10 = pd.read_pickle(output_directory+"iac_pos_neighborhoods_10_10.pickle")
 iac_positive_all_10_10 = pd.merge(iac_pos_neighborhoods_df_10_10,iac_positive_df, on = ["accession","cluster_number","assembly"])
 iac_positive_all_10_10 = iac_positive_all_10_10.rename(columns={"coord_list_y": "coord_list"}).drop(columns=['coord_list_x'])
 iac_positive_all_gtdb_10_10= iac_positive_all_10_10[iac_positive_all_10_10['gtdb_tax'].notnull()]
-iac_positive_all_10_10.to_pickle("results/iac_positive_all_data_10_10.pickle")
-iac_positive_all_10_10.to_csv("results/iac_positive_all_data_10_10.tsv", sep = '\t', index = False)
-iac_positive_all_10_10.to_excel("results/iac_positive_all_data_10_10.xlsx", index = False)
-iac_positive_all_gtdb_10_10.to_pickle("results/iac_positive_all_data_gtdb_10_10.pickle")
-iac_positive_all_gtdb_10_10.to_csv("results/iac_positive_all_data_gtdb_10_10.tsv", sep = '\t', index = False)
-iac_positive_all_gtdb_10_10.to_excel("results/iac_positive_all_data_gtdb_10_10.xlsx", index = False)
-
+iac_positive_all_10_10.to_pickle(output_directory+"iac_positive_all_data_10_10.pickle")
+iac_positive_all_10_10.to_csv(output_directory+"iac_positive_all_data_10_10.tsv", sep = '\t', index = False)
+iac_positive_all_10_10.to_excel(output_directory+"iac_positive_all_data_10_10.xlsx", index = False)
+iac_positive_all_gtdb_10_10.to_pickle(output_directory+"iac_positive_all_data_gtdb_10_10.pickle")
+iac_positive_all_gtdb_10_10.to_csv(output_directory+"iac_positive_all_data_gtdb_10_10.tsv", sep = '\t', index = False)
+iac_positive_all_gtdb_10_10.to_excel(output_directory+"iac_positive_all_data_gtdb_10_10.xlsx", index = False)
 #get 20 neighbors on each side of the cluster:
 
 inputs_fetchneighborhood_20_20 = list(range(0,len(iac_positive_df)))
@@ -488,16 +517,16 @@ with concurrent.futures.ProcessPoolExecutor(max_workers=None) as executor:
         pass
 
 iac_pos_neighborhoods_20_20 = list(filter(None, outputs_fetchneighborhood_20_20))
-iac_pos_neighborhoods_df_20_20= pd.DataFrame(iac_pos_neighborhoods_20_20, columns=('accession', 'assembly', 'title', 'feature_count_nhbr', 'cluster_len_nhbr', 'synteny_nhbr', 'synteny_dir_dist_nhbr', 'synteny_dir_nhbr','cluster_number','coord_list','adj_coord_list','tared_adj_coord_list','itol_cluster_string', 'nhbrhood_hit_list','nhbrhood_locus_tags','nhbrhood_old_locus_tags','nhbrhood_prot_ids','nhbrhood_prot_name','nhbrhood_prot_seq', 'clusterGC', 'genomeGC','diffGC','cluster_seq'))
-iac_pos_neighborhoods_df_20_20.to_csv("results/iac_pos_neighborhoods_20_20.tsv",sep = '\t', index = False)
-iac_pos_neighborhoods_df_20_20.to_pickle("results/iac_pos_neighborhoods_20_20.pickle")
-iac_pos_neighborhoods_df_20_20 = pd.read_pickle("results/iac_pos_neighborhoods_20_20.pickle")
+iac_pos_neighborhoods_df_20_20= pd.DataFrame(iac_pos_neighborhoods_20_20, columns=('accession', 'assembly', 'title', 'feature_count_nhbr', 'cluster_len_nhbr', 'synteny_nhbr', 'synteny_dir_dist_nhbr', 'synteny_dir_nhbr','cluster_number','coord_list','adj_coord_list','tared_adj_coord_list','itol_cluster_string', 'nhbrhood_hit_list','nhbrhood_locus_tags','nhbrhood_old_locus_tags','nhbrhood_prot_ids','nhbrhood_prot_name','nhbrhood_prot_seq', 'clusterGC', 'genomeGC','diffGC','minhash_similarity','minhash_similarity','cluster_seq'))
+iac_pos_neighborhoods_df_20_20.to_csv(output_directory+"iac_pos_neighborhoods_20_20.tsv",sep = '\t', index = False)
+iac_pos_neighborhoods_df_20_20.to_pickle(output_directory+"iac_pos_neighborhoods_20_20.pickle")
+iac_pos_neighborhoods_df_20_20 = pd.read_pickle(output_directory+"iac_pos_neighborhoods_20_20.pickle")
 iac_positive_all_20_20 = pd.merge(iac_pos_neighborhoods_df_20_20,iac_positive_df, on = ["accession","cluster_number","assembly"])
 iac_positive_all_20_20 = iac_positive_all_20_20.rename(columns={"coord_list_y": "coord_list"}).drop(columns=['coord_list_x'])
 iac_positive_all_gtdb_20_20= iac_positive_all_20_20[iac_positive_all_20_20['gtdb_tax'].notnull()]
-iac_positive_all_20_20.to_pickle("results/iac_positive_all_data_20_20.pickle")
-iac_positive_all_20_20.to_csv("results/iac_positive_all_data_20_20.tsv", sep = '\t', index = False)
-iac_positive_all_20_20.to_excel("results/iac_positive_all_data_20_20.xlsx", index = False)
-iac_positive_all_gtdb_20_20.to_pickle("results/iac_positive_all_data_gtdb_20_20.pickle")
-iac_positive_all_gtdb_20_20.to_csv("results/iac_positive_all_data_gtdb_20_20.tsv", sep = '\t', index = False)
-iac_positive_all_gtdb_20_20.to_excel("results/iac_positive_all_data_gtdb_20_20.xlsx", index = False)
+iac_positive_all_20_20.to_pickle(output_directory+"iac_positive_all_data_20_20.pickle")
+iac_positive_all_20_20.to_csv(output_directory+"iac_positive_all_data_20_20.tsv", sep = '\t', index = False)
+iac_positive_all_20_20.to_excel(output_directory+"iac_positive_all_data_20_20.xlsx", index = False)
+iac_positive_all_gtdb_20_20.to_pickle(output_directory+"iac_positive_all_data_gtdb_20_20.pickle")
+iac_positive_all_gtdb_20_20.to_csv(output_directory+"iac_positive_all_data_gtdb_20_20.tsv", sep = '\t', index = False)
+iac_positive_all_gtdb_20_20.to_excel(output_directory+"iac_positive_all_data_gtdb_20_20.xlsx", index = False)
