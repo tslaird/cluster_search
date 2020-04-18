@@ -1,3 +1,6 @@
+
+#!/usr/bin/env python3
+
 import re
 import sys
 import pandas as pd
@@ -7,10 +10,13 @@ import time
 import xml.etree.ElementTree as ET
 import numpy as np
 import concurrent.futures
+import urllib.request
 import glob
 import os
 from sourmash import MinHash
-
+import itertools
+import scipy
+from scipy import spatial
 
 
 #ncbi key needed for fetching metadata
@@ -156,25 +162,32 @@ def fetchneighborhood2(index,features_upstream = 0,features_downstream = 0):
     clusterGC = (g+c)/(g+c+a+t)
     diffGC = abs(clusterGC - genomeGC)
     #compare minhash values between cluster and genome
-    kmer_size=7
+    kmer_size=4
     n=0
     sc=1
     cluster_minhash= MinHash(n=n, ksize=kmer_size,scaled=sc)
-    cluster_minhash.add_sequence(cluster_seq)
-    cluster_minhash.add_sequence(complement(cluster_seq))
+    cluster_minhash.add_sequence(cluster_seq,force=True)
+    cluster_minhash.add_sequence(complement(cluster_seq),force=True)
     #
     genome_minhash= MinHash(n=n, ksize=kmer_size,scaled=sc)
-    genome_minhash.add_sequence(genome_seq)
-    genome_minhash.add_sequence(complement(genome_seq))
-    #
-    genome_minus_cluster=re.sub(cluster_seq,'',genome_seq)
-    print(len(genome_seq)-len(genome_minus_cluster))
-    genome_minus_cluster_minhash=MinHash(n=n, ksize=kmer_size,scaled=sc)
-    genome_minus_cluster_minhash.add_sequence(genome_minus_cluster)
-    genome_minus_cluster_minhash.add_sequence(complement(genome_minus_cluster))
+    genome_minhash.add_sequence(genome_seq,force=True)
+    genome_minhash.add_sequence(complement(genome_seq),force=True)
     minhash_sim=cluster_minhash.similarity(genome_minhash)
-    minhash_sim_minus_cluster=cluster_minhash.similarity(genome_minus_cluster_minhash)
-    print(minhash_sim)
+    # genome_minus_cluster=re.sub(cluster_seq,'',genome_seq)
+    # #print(len(genome_seq)-len(genome_minus_cluster))
+    # genome_minus_cluster_minhash=MinHash(n=n, ksize=kmer_size,scaled=sc)
+    # genome_minus_cluster_minhash.add_sequence(genome_minus_cluster,force=True)
+    # genome_minus_cluster_minhash.add_sequence(complement(genome_minus_cluster),force=True)
+    # minhash_sim_minus_cluster=cluster_minhash.similarity(genome_minus_cluster_minhash)
+    #print(minhash_sim)
+    #compare tetranucleotide frequency between cluster and genomes
+    bases=['a','t','g','c']
+    four_mers=[''.join(p) for p in itertools.product(bases, repeat=4)]
+    four_mer_count_genome= np.add([genome_seq.count(i) for i in four_mers], [complement(genome_seq).count(i) for i in four_mers])
+    four_mer_freq_genome = [i/sum(four_mer_count_genome) for i in four_mer_count_genome]
+    four_mer_count_cluster=np.add([cluster_seq.count(i) for i in four_mers], [complement(cluster_seq).count(i) for i in four_mers])
+    four_mer_freq_cluster = [i/sum(four_mer_count_cluster) for i in four_mer_count_cluster]
+    four_mer_distance=scipy.spatial.distance.cityblock(four_mer_freq_cluster,four_mer_freq_genome)
     ####
     if sum( neighborhood[neighborhood['query_match'].notnull()]['direction'] ) < 0:
             neighborhood['actual_start_tmp'] = neighborhood['start_coord']
@@ -262,14 +275,25 @@ def fetchneighborhood2(index,features_upstream = 0,features_downstream = 0):
     #obtains "A-B-C"
     synteny= re.sub("\n" ,"-", neighborhood['query_match'].to_string(index=False))
     synteny= re.sub("Iac| " ,"", synteny)
+    synteny_alphabet = "".join([ gene['query_match'].replace("Iac","").upper() if gene['direction'] == 1 else gene['query_match'].replace("Iac","").lower() for index,gene in neighborhood.iterrows()  ])
     cluster_len= max(neighborhood['end_coord']) - min(neighborhood ['start_coord'])
     assembly= re.sub("\{|\}|\'|>","", str(set(neighborhood['assembly'])) )
     accession = re.sub("\{|\}|\'","", str(set(neighborhood['accession'])) )
     title= re.sub("\{|\}|\'", "",str(set(neighborhood['name'])) )
     print(assembly_index_file + " successfully used")
-    return([accession, assembly, title, len(neighborhood), cluster_len, synteny, synteny_dir_dist, synteny_dir, cluster_number,coord_list,adj_coord_list,tared_adj_coord_list,itol_diagram_string, nhbrhood_hit_list,nhbrhood_locus_tags,nhbrhood_old_locus_tags,nhbrhood_prot_ids,nhbrhood_prot_name,nhbrhood_prot_seq, clusterGC, genomeGC,diffGC,minhash_sim, minhash_sim_minus_cluster, cluster_seq])
+    return([accession, assembly, title, len(neighborhood), cluster_len, synteny,synteny_alphabet, synteny_dir_dist, synteny_dir, cluster_number,coord_list,adj_coord_list,tared_adj_coord_list,itol_diagram_string, nhbrhood_hit_list,nhbrhood_locus_tags,nhbrhood_old_locus_tags,nhbrhood_prot_ids,nhbrhood_prot_name,nhbrhood_prot_seq, clusterGC, genomeGC,diffGC,minhash_sim,four_mer_distance,four_mer_freq_cluster, cluster_seq])
 
 ###running the functions
+if not os.path.exists("gtdb/"):
+    os.mkdir("gtdb/")
+
+if not os.path.exists("gtdb/bac120_metadata_r89.tsv"):
+    print("downloading gtdb data")
+    urllib.request.urlretrieve("https://data.ace.uq.edu.au/public/gtdb/data/releases/release89/89.0/bac120_metadata_r89.tsv",'gtdb/bac120_metadata_r89.tsv')
+
+if not os.path.exists(output_directory+"blast_output_table.txt"):
+    blastout = pd.read_csv(output_directory+"blast_out.txt", sep='\t',low_memory = False, names=["qseqid","qgi","qacc","sseqid","sallseqid","sgi","sallgi","sacc","sallacc","qstart","qend","sstart","send","qseq","sseq","evalue","bitscore","score","length","qlen","slen","pident","nident","mismatch","positive","gapopen","gaps","ppos","frames","qframe","sframe","btop","staxids","sscinames","scomnames","sblastnames","sskingdoms","stitle","salltitles","sstrand","qcovs","qcovhsp","qcovus"])
+    blastout.to_csv(output_directory+"blast_output_table.txt",sep='\t')
 
 if not os.path.exists(output_directory+"iac_positive_df.pickle"):
     blastout = pd.read_csv(output_directory+"blast_output_table.txt", sep='\t', low_memory = False)
@@ -445,6 +469,7 @@ with concurrent.futures.ThreadPoolExecutor(max_workers=None) as executor:
     for i in executor.map(make_indexprot, inputs_indexprot):
         pass
 
+fetchneighborhood_columns=['accession','assembly', 'title', 'feature_count_nhbr', 'cluster_len_nhbr', 'synteny_nhbr','synteny_alphabet_nhbr', 'synteny_dir_dist_nhbr', 'synteny_dir_nhbr','cluster_number','coord_list','adj_coord_list','tared_adj_coord_list','itol_cluster_string', 'nhbrhood_hit_list','nhbrhood_locus_tags','nhbrhood_old_locus_tags','nhbrhood_prot_ids','nhbrhood_prot_name','nhbrhood_prot_seq', 'clusterGC','genomeGC','diffGC','minhash_similarity','four_mer_distance','four_mer_freq_cluster','cluster_seq']
 inputs_fetchneighborhood = list(range(0,len(iac_positive_df)))
 outputs_fetchneighborhood=[]
 
@@ -458,7 +483,7 @@ with concurrent.futures.ProcessPoolExecutor(max_workers=None) as executor:
         pass
 
 iac_pos_neighborhoods = list(filter(None, outputs_fetchneighborhood))
-iac_pos_neighborhoods_df= pd.DataFrame(iac_pos_neighborhoods, columns=('accession', 'assembly', 'title', 'feature_count_nhbr', 'cluster_len_nhbr', 'synteny_nhbr', 'synteny_dir_dist_nhbr', 'synteny_dir_nhbr','cluster_number','coord_list','adj_coord_list','tared_adj_coord_list','itol_cluster_string', 'nhbrhood_hit_list','nhbrhood_locus_tags','nhbrhood_old_locus_tags','nhbrhood_prot_ids','nhbrhood_prot_name','nhbrhood_prot_seq', 'clusterGC', 'genomeGC','diffGC','minhash_similarity','minhash_similarity2','cluster_seq'))
+iac_pos_neighborhoods_df= pd.DataFrame(iac_pos_neighborhoods, columns=fetchneighborhood_columns)
 iac_pos_neighborhoods_df.to_csv(output_directory+"iac_pos_neighborhoods.tsv",sep = '\t', index = False)
 iac_pos_neighborhoods_df.to_pickle(output_directory+"iac_pos_neighborhoods.pickle")
 # merge the neighborhoods and iac_positive dataframes
@@ -490,7 +515,7 @@ with concurrent.futures.ProcessPoolExecutor(max_workers=None) as executor:
         pass
 
 iac_pos_neighborhoods_10_10 = list(filter(None, outputs_fetchneighborhood_10_10))
-iac_pos_neighborhoods_df_10_10= pd.DataFrame(iac_pos_neighborhoods_10_10, columns=('accession', 'assembly', 'title', 'feature_count_nhbr', 'cluster_len_nhbr', 'synteny_nhbr', 'synteny_dir_dist_nhbr', 'synteny_dir_nhbr','cluster_number','coord_list','adj_coord_list','tared_adj_coord_list','itol_cluster_string', 'nhbrhood_hit_list','nhbrhood_locus_tags','nhbrhood_old_locus_tags','nhbrhood_prot_ids','nhbrhood_prot_name','nhbrhood_prot_seq', 'clusterGC','genomeGC','diffGC','minhash_similarity','minhash_similarity2','cluster_seq'))
+iac_pos_neighborhoods_df_10_10= pd.DataFrame(iac_pos_neighborhoods_10_10, columns=fetchneighborhood_columns)
 iac_pos_neighborhoods_df_10_10.to_csv(output_directory+"iac_pos_neighborhoods_10_10.tsv",sep = '\t', index = False)
 iac_pos_neighborhoods_df_10_10.to_pickle(output_directory+"iac_pos_neighborhoods_10_10.pickle")
 iac_pos_neighborhoods_df_10_10 = pd.read_pickle(output_directory+"iac_pos_neighborhoods_10_10.pickle")
@@ -517,7 +542,7 @@ with concurrent.futures.ProcessPoolExecutor(max_workers=None) as executor:
         pass
 
 iac_pos_neighborhoods_20_20 = list(filter(None, outputs_fetchneighborhood_20_20))
-iac_pos_neighborhoods_df_20_20= pd.DataFrame(iac_pos_neighborhoods_20_20, columns=('accession', 'assembly', 'title', 'feature_count_nhbr', 'cluster_len_nhbr', 'synteny_nhbr', 'synteny_dir_dist_nhbr', 'synteny_dir_nhbr','cluster_number','coord_list','adj_coord_list','tared_adj_coord_list','itol_cluster_string', 'nhbrhood_hit_list','nhbrhood_locus_tags','nhbrhood_old_locus_tags','nhbrhood_prot_ids','nhbrhood_prot_name','nhbrhood_prot_seq', 'clusterGC', 'genomeGC','diffGC','minhash_similarity','minhash_similarity','cluster_seq'))
+iac_pos_neighborhoods_df_20_20= pd.DataFrame(iac_pos_neighborhoods_20_20, columns=fetchneighborhood_columns)
 iac_pos_neighborhoods_df_20_20.to_csv(output_directory+"iac_pos_neighborhoods_20_20.tsv",sep = '\t', index = False)
 iac_pos_neighborhoods_df_20_20.to_pickle(output_directory+"iac_pos_neighborhoods_20_20.pickle")
 iac_pos_neighborhoods_df_20_20 = pd.read_pickle(output_directory+"iac_pos_neighborhoods_20_20.pickle")
