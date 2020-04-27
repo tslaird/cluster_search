@@ -1,22 +1,22 @@
-The cluster search pipeline is used for finding iac gene clusters within RefSeq genomes
-The pipeline is implemented in python using several python scripts ".py"
-This pipline currently downloads and runs on the entire set of RefSeq bacterial genomes and is best run on a computer cluster
-This pipeline can be modified to run on a smaller sized database of genomes from RefSeq
-This pipeline can also be modified to search for gene clusters besides the iac cluster
+The cluster search pipeline is used for finding iac gene clusters within RefSeq genomes  
+The pipeline is implemented in python using several python scripts ".py"  
+This pipline currently downloads and runs on the entire set of RefSeq bacterial genomes and is best run on a computer cluster  
+This pipeline can be modified to run on a smaller sized database of genomes from RefSeq  
+This pipeline can also be modified to search for gene clusters besides the iac cluster  
 
-To download/unzip bacterial genomes as ".gbff" files from the RefSeq database and check their integrity based on md5 sums run:
+To download/unzip bacterial genomes as ".gbff" files from the RefSeq database and check their integrity based on md5 sums run:  
 ```
 python download_genomes.py
 ```
-To parse the ".gbff" files and create ".fasta" protein files with informative headers run:
+To parse the ".gbff" files and create ".fasta" protein files with informative headers run:  
 ```
 python parse_gbff_files.py
 ```
-Combining the ".fasta" files and subsequently creating blast databases from those files:
+Combining the ".fasta" files and subsequently creating blast databases from those files:  
 ```
 python make_blastdb.py
 ```
-Running the blastp algorithm using iac genes as a query against the previously made databases:
+Running the blastp algorithm using iac genes as a query against the previously made databases:  
 ```
 python run_blastp.py
 ```
