@@ -1,12 +1,13 @@
 The cluster search pipeline is used for finding iac gene clusters within RefSeq genomes
-
 The pipeline is implemented in python using several python scripts ".py"
+This pipline currently downloads and runs on the entire set of RefSeq bacterial genomes and is best run on a computer cluster
+This pipeline can be modified to run on a smaller sized database of genomes from RefSeq
+This pipeline can also be modified to search for gene clusters besides the iac cluster
 
 To download/unzip bacterial genomes as ".gbff" files from the RefSeq database and check their integrity based on md5 sums run:
 ```
 python download_genomes.py
 ```
-
 To parse the ".gbff" files and create ".fasta" protein files with informative headers run:
 ```
 python parse_gbff_files.py
@@ -38,7 +39,7 @@ cluster_number
 adj_coord_list
 tared_adj_coord_list
 itol_cluster_string
-nhbrhood_hit_list:		a list of 
+nhbrhood_hit_list:		a list of
 nhbrhood_locus_tags:		a list of locus tags" from proteins in the cluster neighborhood
 nhbrhood_old_locus_tags:	a list of "old locus tags" from proteins in the cluster neighborhood
 nhbrhood_prot_ids		a list of protein ids from proteins in the cluster neighborhood
@@ -60,9 +61,9 @@ name
 hit_list			a list of the "locus tags" for a cluster parsed from the gbff file
 old_locus_hit_list:		a list of the "old locus tags" for a cluster parsed from the gbff file
 protein_name_list
-protein_id_list	
+protein_id_list
 #pseudogene_list
-query_list:			the list of the 
+query_list:			the list of the
 coord_list:			the coordinate list of the cluster genes
 contig:			
 complete_genome:		whetehr or not the cluster comes from a complete genome based on pattern matching with the name
@@ -86,4 +87,3 @@ order_gtdb:			the gtdb assigned order
 family_gtdb:			the gtdb assigned family
 genus_gtdb:			the gtdb assigned genus
 species_gtdb:			the gtdb assigned species
-
