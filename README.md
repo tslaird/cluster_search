@@ -27,7 +27,6 @@ python parse_blastp.py
 The output of the results file is given in several file formats including a tsv file, xlsx file, and ".pickle" file (for use in python)
 
 The table headers include:
-
 accession:			the accession number of the contig containing the cluster
 assembly:			the name of the RefSeq genome assembly the cluster is found in (e.g. "GCF_XXXXXXX.X)
 title:				the name of the contig containing the cluster
