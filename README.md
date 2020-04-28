@@ -3,6 +3,8 @@ The pipeline is implemented in python using several python scripts ".py"
 This pipline currently downloads and runs on the entire set of RefSeq bacterial genomes and is best run on a computer cluster  
 This pipeline can be modified to run on a smaller sized database of genomes from RefSeq  
 This pipeline can also be modified to search for gene clusters besides the iac cluster  
+For help using or modifying this pipeline contact: tslaird@ucdavis.edu
+
 
 To download/unzip bacterial genomes as ".gbff" files from the RefSeq database and check their integrity based on md5 sums run:  
 ```
