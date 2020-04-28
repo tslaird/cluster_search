@@ -16,7 +16,7 @@ Combining the ".fasta" files and subsequently creating blast databases from thos
 ```
 python make_blastdb.py
 ```
-Running the blastp algorithm using iac genes as a query against the previously made databases:  
+Running the blastp algorithm using iac genes as a query against the previously made databases:
 ```
 python run_blastp.py
 ```
