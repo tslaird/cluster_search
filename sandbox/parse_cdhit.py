@@ -198,7 +198,6 @@ phi_values=[]
 jaccard=[]
 all_contingency_tables={}
 contingency_tables=[]
-
 def iter_fetest(row):
     results=[]
     for row2 in mat.itertuples(name=None):
@@ -208,7 +207,7 @@ def iter_fetest(row):
         negpos=combo.count((0,1))
         negneg=combo.count((0,0))
         contingency_table=tuple([tuple([pospos,posneg]),tuple([negpos,negneg])]) 
-        #jaccard.append(scipy.spatial.distance.jaccard(A[1::],row[1::]))
+        jaccard.append(scipy.spatial.distance.jaccard(row[1::],row2[1::]))
         #try:
         #    phi= ((pospos*negneg)-(posneg*negpos))/math.sqrt((pospos+posneg)*(negpos+negneg)*(pospos+negpos)*(posneg+negneg))     
         #except:
@@ -226,7 +225,7 @@ def iter_fetest(row):
 start=time.time()
 out=[]
 with concurrent.futures.ProcessPoolExecutor(max_workers=None) as executor:
-    for i in executor.map(iter_fetest, df_tuples[0:500]):
+    for i in executor.map(iter_fetest, df_tuples[0:20]):
         out.append(i)
         pass    
 print(time.time()-start)   
@@ -234,13 +233,12 @@ print(time.time()-start)
 Z=np.array(out)
 Z_indices=np.triu_indices(len(Z),-1)
 Z[Z_indices]=0
-#Z_tri=np.tril(Z)
-#np.fill_diagonal(Z_tri, 0)
-#Z_masked=np.ma.masked_equal(Z_tri,0)
+Z_tri=np.tril(Z)
+np.fill_diagonal(Z_tri, 0)
+Z_masked=np.ma.masked_equal(Z_tri,-1)
 #Z_data=ma.getdata(Z_masked)
 Z_data=Z[Z_masked>0]
 p_adj=multi.multipletests(Z_data,method='fdr_bh')[1]
-
 
 Z_adj = np.zeros(Z.shape)
 indices = np.tril_indices(len(Z),-1)
@@ -252,7 +250,7 @@ Z_adj[indices] = p_adj
 
 
 ###############################
-
+df_tuples=tuple(mat.itertuples(name=None))
 
 
 
