@@ -1,12 +1,5 @@
 library(dendextend)
 
-distmat_cluster<-read.csv('/Users/tslaird/Box/leveau_lab/iac_database/distmat_cluster.csv')
-distmat_cluster2<-read.csv('/Users/tslaird/Box/leveau_lab/iac_database/distmat_cluster_twos.csv')
-distmat_cluster3<-read.csv('/Users/tslaird/Box/leveau_lab/iac_database/distmat_cluster_threes.csv')
-distmat_cluster4<-read.csv('/Users/tslaird/Box/leveau_lab/iac_database/distmat_cluster_fours.csv')
-mat2<-distmat_cluster2[,2:ncol(distmat_cluster2)]
-mat3<-distmat_cluster3[,2:ncol(distmat_cluster3)]
-mat4<-distmat_cluster4[,2:ncol(distmat_cluster4)]
 
 consensus_mat<-(mat2+mat3+mat4)/3
 mat<-mat2
@@ -29,6 +22,9 @@ for(i in seq(1:length(methods))){
 }
 results<-cbind.data.frame(methods,correlation)
 print(results[order(-results$correlation),])
+
+
+
 
 
 hclust<-hclust(as.dist(mat), method='average')
@@ -117,28 +113,80 @@ mat_names<- gsub('\\|','J',  mat_names)
 rownames(mat)<- mat_names
 colnames(mat)<-mat_names
 
+#start----
+library(kmer)
+library(stringi)
+library(gtools)
+library(ecodist)
+library(stringr)
+#get GTDB taxonomy order
+cluster_df<-read.csv('/home/tslaird/leveau_lab/cluster_search/FARM_output/iac_positive_all_data.tsv', sep='\t', stringsAsFactors = T)
 
-df<- read.csv('/Users/tslaird/Box/leveau_lab/FARM_output/iac_search_09122019_no_pfam_filter/results_09122019_nopfam_filter/iac_positive_all_data.tsv', sep = '\t')
+GTDB_taxonomy<-cluster_df[,colnames(cluster_df) %in% c('domain_gtdb','phylum_gtdb','class_gtdb','order_gtdb','family_gtdb','genus_gtdb','species_gtdb')]
+GTDB_taxonomy<-GTDB_taxonomy[GTDB_taxonomy$domain_gtdb!='',]
+colnames(GTDB_taxonomy)<-c('Domain','Phylum','Class','Order','Family','Genus','Species')
+GTDB_taxonomy$Domain<- factor(GTDB_taxonomy$Domain,levels(GTDB_taxonomy$Domain)[order(table(GTDB_taxonomy$Domain), decreasing = F)])
+GTDB_taxonomy$Phylum<- factor(GTDB_taxonomy$Phylum, levels(GTDB_taxonomy$Phylum)[order(table(GTDB_taxonomy$Phylum), decreasing = F)])
+GTDB_taxonomy$Class<- factor(GTDB_taxonomy$Class, levels(GTDB_taxonomy$Class)[order(table(GTDB_taxonomy$Class), decreasing = F)])
+GTDB_taxonomy$Order<- factor(GTDB_taxonomy$Order,levels(GTDB_taxonomy$Order)[order(table(GTDB_taxonomy$Order), decreasing = F)])
+#specially make Burkholderia come after
+#GTDB_taxonomy$Order<- factor(GTDB_taxonomy$Order,c("Streptomycetales","Actinomycetales","Azospirillales",
+#  "Propionibacteriales","Rhizobiales","Acetobacterales" ,"Rhodobacterales","Sphingomonadales",
+#  "Mycobacteriales" , "Burkholderiales" ,"Xanthomonadales", "Enterobacterales", "Pseudomonadales"))
+#
+GTDB_taxonomy$Family<- factor(GTDB_taxonomy$Family,levels(GTDB_taxonomy$Family)[order(table(GTDB_taxonomy$Family), decreasing = F)])
+GTDB_taxonomy$Genus<- factor(GTDB_taxonomy$Genus,levels(GTDB_taxonomy$Genus)[order(table(GTDB_taxonomy$Genus), decreasing = F)])
+GTDB_taxonomy$Species<- factor(GTDB_taxonomy$Species,levels(GTDB_taxonomy$Species)[order(table(GTDB_taxonomy$Species), decreasing = F)])
+
+GTDB_taxonomy$Domain_freq <-as.numeric(GTDB_taxonomy$Domain)
+GTDB_taxonomy$Phylum_freq <-as.numeric(GTDB_taxonomy$Phylum)
+GTDB_taxonomy$Class_freq <-as.numeric(GTDB_taxonomy$Class)
+GTDB_taxonomy$Order_freq <-as.numeric(GTDB_taxonomy$Order)
+GTDB_taxonomy$Family_freq <-as.numeric(GTDB_taxonomy$Family)
+GTDB_taxonomy$Genus_freq <-as.numeric(GTDB_taxonomy$Genus)
+GTDB_taxonomy$Species_freq <-as.numeric(GTDB_taxonomy$Species)
+
+GTDB_taxonomy<-GTDB_taxonomy[ order( GTDB_taxonomy$Domain_freq,
+                                     GTDB_taxonomy$Phylum_freq,
+                                     GTDB_taxonomy$Class_freq,
+                                     GTDB_taxonomy$Order_freq,
+                                     GTDB_taxonomy$Family_freq,
+                                     GTDB_taxonomy$Genus_freq,
+                                     GTDB_taxonomy$Species_freq,
+                                     decreasing = T),]
+
+
+GTDB_taxonomy<-GTDB_taxonomy[,c(1:6)]
+GTDB_taxonomy<-data.frame(lapply(GTDB_taxonomy, function(x) gsub('-','_',x)))
 
 gtdb<- cluster_df[cluster_df$gtdb_tax !='' & !sapply(cluster_df$nhbrhood_prot_ids,function(x) grepl(x,'nan')),]
-gtdb$synteny_dir_nhbr<- sapply(gtdb$synteny_dir_nhbr,function(x) gsub('〉','r',x))
-gtdb$synteny_dir_nhbr<- sapply(gtdb$synteny_dir_nhbr,function(x) gsub('〈','l',x))
-gtdb$synteny_dir_nhbr<- sapply(gtdb$synteny_dir_nhbr,function(x) gsub(' ','',x))
-gtdb$synteny_dir_nhbr<- sapply(gtdb$synteny_dir_nhbr,function(x) gsub('\\|','J',x))
 
+synteny_dist<-adist(unique(gtdb$synteny_alphabet_nhb), costs =  list(ins=1, del=10, sub=5) )
 
-synteny_dist<-adist(unique(gtdb$synteny_alphabet_nhb))
+combos<-permutations(8, 2, c('A','B','C','D','E','H','I','X'), repeats = T)[1:63,]
+combos_str<-paste0(combos[,1],combos[,2])
+combos_counts<-t(sapply(unique(gtdb$synteny_alphabet_nhb), function(y) sapply(combos_str, function(x) str_count(y,x) + str_count(stri_reverse(y),x) )))
+synteny_dist_kmer<-distance(combos_counts, method='jaccard')
+synteny_dist<-as.matrix(synteny_dist_kmer)
+
+methods<-c("ward.D","ward.D2","single","complete","average","mcquitty","median","centroid")
+correlation<-c()
+for(i in seq(1:length(methods))){
+  hc<- hclust(as.dist(synteny_dist),method=methods[i])
+  hc_coph<-cophenetic(hc)
+  correlation[i]<- cor(as.dist(synteny_dist_kmer),hc_coph)
+}
+results<-cbind.data.frame(methods,correlation)
+print(results[order(-results$correlation),])
 colnames(synteny_dist)<-unique(gtdb$synteny_alphabet_nhb)
 rownames(synteny_dist)<-unique(gtdb$synteny_alphabet_nhb)
+hclust<-hclust(as.dist(synteny_dist), method='average')
 plot(hclust(as.dist(synteny_dist)))
 
-
-gtdb<-gtdb[gtdb$synteny_dir_nhbr %in% colnames(mat),]
 crosstab<-as.data.frame.matrix(table(gtdb$synteny_alphabet_nhbr,gtdb$family_gtdb))[-1]
 colnames(crosstab)<-gsub('f__','',colnames(crosstab))
 #crosstab_rel<-t(apply(crosstab,1,function(x) x/sum(x)))
-#hclust<-hclust(as.dist(mat), method='average')
-hclust<-hclust(as.dist(synteny_dist))
+#hclust<-hclust(as.dist(synteny_dist))
 #crosstab_rel<-crosstab_rel[hclust$labels[hclust$order],]
 crosstab_rel_binary<-ifelse(crosstab>0,1,0)
 x  <- as.matrix(crosstab_rel_binary[hclust$labels,])
@@ -152,168 +200,72 @@ heatmaply(x, Rowv = row_dend, Colv = F,fontsize_row = 6,
 
 library(pheatmap)
 
-svglite::svglite('clusters_pheatmap_only.svg',width = 10, height=11)
-pdf('clusters_pheatmap_bw.pdf',width = 10, height=11)
-ph<-pheatmap(x, cluster_rows = hclust,cluster_cols = FALSE, cellwidth = 10, cellheight = 7,
-         border_color = 'grey', labels_row = rep('',nrow(x)),
+svglite::svglite('cluster_of_clusters_pheatmap_only.svg',width = 10, height=11)
+pdf('clusters_pheatmap_bw.pdf',width = 10, height=15)
+ph<-pheatmap(x, cluster_rows = hclust,cluster_cols = FALSE, cellwidth = 8, cellheight = 5,
+         border_color = 'grey', labels_row = hclust$labels,fontsize_row = 6.5,
          color = c('white','black'))
 ph$gtable$grobs[[1]]$gp <- gpar(lex=3.5)
 ph
 dev.off()
-library(stringr)
 
-color_map<-data.frame('gene'=c('A','B','C','D','E','H','I','x'),
+color_map<-data.frame('gene'=c('A','B','C','D','E','H','I','X'),
                       'color'=c('red','orange','yellow','green','dodgerblue1','purple','violet','grey'))
-library(genoPlotR)
+
 clusters<-list()
 for( i in hclust$labels[hclust$order]){
-  names=unlist(str_extract_all(i,'[ABCDEHIx]'))
-  names_dir=unlist(str_extract_all(i,'...'))
+  names=unlist(str_extract_all(i,'[AaBbCcDdEeHhIiXx]'))
+  names_upper=toupper(names)
   starts<-c()
   ends<-c()
   strands<-c()
   cols<-c()
   for(n in c(1:(length(names)))){
-    starts<-c(starts,n*-5)
-    ends<-c(ends,(n+1)*-5)
-    strands<-c(strands,ifelse(grepl('r',names_dir[n]),1,-1 ) )
-    cols<-c(cols, toString(color_map[color_map$gene== names[n],]$color) )
+    starts<-c(starts,n*5)
+    ends<-c(ends,(n+1)*5)
+    strands<-c(strands,ifelse(grepl("^[[:upper:]]+$",names[n]),1,-1 ) )
+    cols<-c(cols, toString(color_map[color_map$gene== names_upper[n],]$color) )
   }
-  clusters[[i]]<-dna_seg(data.frame(name=names, start=starts, end=ends,
+  clusters[[i]]<-dna_seg(data.frame(name=names_upper, start=starts, end=ends,
                                           strand=strands, fill=cols, col='black')) 
 }
-cluster_tree<- hclust2phylog(hclust)
-plot_gene_map(dna_segs=clusters, tree=cluster_tree,tree_branch_labels_cex=NULL,
-              dna_seg_labels=NULL,
-              seg_plot_height=70)
-
-mid_pos <- middle(clusters[[1]])
-
-annots<-list()
-for(i in c(1:length(clusters))){
-  mid_pos <- middle(clusters[[i]])
-  annots[[i]]<- annotation(x1=mid_pos,text=paste(ifelse(clusters[[i]]$name !='x',clusters[[i]]$name,'')  ))
-}
 
 
-svglite::svglite('genoplotr_cluster_arrows.svg', width=10, height =22)
-plot_gene_map(dna_segs = clusters, annotations = annots,tree=cluster_tree,annotation_height = 0.2,annotation_cex = 0.7)
-dev.off()
-
-pdf('test_genoplotr.pdf', width=10,height = 20)
-plot_gene_map(dna_segs=clusters,tree=cluster_tree,seg_plot_height=5,annotation_height=5,fixed_gap_length=0.1)
-dev.off()
-
-
-cluster_tree$leaves
-names(clusters)[1] == names(cluster_tree$leaves)[1]
-plot(cluster_tree)
-
-names(clusters)<-c(1:length(labels(clusters)))
-cluster_tree$leaves<-as.character(c(1:length(labels(clusters))))
-
-
-
-
-cluster_tree$tre
-
-plot(cluster_tree)
-
-sort(colSums(x))
-
-unique(gtdb$family_gtdb)
-library(pheatmap)
-library(heatmaply)
-crosstab_filtered<- crosstab[rowSums(crosstab)>=10,]
-heatmaply(log10(crosstab_filtered+1),fontsize_row = 5)
-mat<-mat2
-mat_names<- distmat_cluster2[,1] 
-rownames(mat)<- mat_names
-colnames(mat)<- mat_names
-hclust<-hclust(as.dist(mat), method='average')
-dend<-as.dendrogram(hclust)
-crosstab_rel<-crosstab_rel[hclust$labels[hclust$order],]
-crosstab_rel_binary<-ifelse(crosstab_rel>0,1,0)
-heatmaply(crosstab_rel,fontsize_row = 6, dendrogram = 'none' ,grid_color = 'white', grid_size = 0.01 )
-heatmaply(crosstab_rel_binary,fontsize_row = 6,
-          grid_color = 'white', grid_size = 0.01 ,colors = c('grey','darkgreen'),
-          Rowv = dend, Colv= F)
-
-x<-data.frame(table(gtdb$synteny_dir_nhbr))
-
-hclust$labels
-
-#compare cluster distance to IacD distance
-
-
-#importing IacD distance matrix----
-distmat <-read.table('/Users/tslaird/Box/leveau_lab/Analysis_no_pfam_filter/IacD_analysis/IacD_sequences_GTDB_09132019_NO_Sphingomonas_IacD1_.fa.trim.msa.uncorrected.distmat', fill = TRUE, skip = 7, sep ='\t')
-distmat<-distmat[-c(1,ncol(distmat)-1)]
-distmat[distmat==""]<- NA
-rownames(distmat)<- distmat[1:nrow(distmat),ncol(distmat)]
-colnames(distmat)<- distmat[1:nrow(distmat),ncol(distmat)]
-distmat<-distmat[-c(ncol(distmat))]
-distmat_tri<-as.dist(t(distmat))
-
-df<- read.csv('/Users/tslaird/Box/leveau_lab/FARM_output/iac_search_09122019_no_pfam_filter/results_09122019_nopfam_filter/iac_positive_all_data.tsv', sep = '\t')
-synteny_dist<-distmat_cluster2[,2:ncol(distmat_cluster2)]
-synteny_clust<-hclust(as.dist(synteny_dist), method='average')
-rownames(synteny_dist)<-distmat_cluster2[,1]
-colnames(synteny_dist)<-distmat_cluster2[,1]
-
-avg_dists<-c()
-for(i in synteny_clust$labels[synteny_clust$order]){
-  assemb<-(gsub('\\.','_',df[df$synteny_dir_nhbr == i,]$assembly_x))
-  index<-c()
-  for(a in assemb){
-    index<-c(index,which(grepl(a,rownames(distmat))))
+#function----
+arrow_plot<- function(input,start=1, left=15,right=25,total_length=100, arrow.width=3,horizontal_x=0, close.gene.setback=5,font_cex=1, center_on=NULL){
+  #lines( c(min(as.numeric(input$start)) ,max(as.numeric(input$end))) ,c(0,0) )
+  if(!is.null(center_on)){
+    setback<- input[input$name==center_on,]$start[1]
+    input$start<-input$start-setback
+    input$end<-input$end-setback
   }
-  mat_subset<-distmat[index,index]
-  if(!is.null(dim(mat_subset))){
-  diag(mat_subset)<-NA
+
+  apply(input, 1, function(x){ 
+    mean_point<-((as.numeric(x['start'])+as.numeric(x['end']))/2)
+    span<-as.numeric(x['end'])-as.numeric(x['start'])
+    if(x['strand']==-1){
+      polygon(c(as.numeric(x['start'])+(span*0.2),x['start'],as.numeric(x['start'])+(span*0.2),x['end'],x['end'],as.numeric(x['start'])+(span*0.2)),
+              c(-arrow.width+horizontal_x,horizontal_x,arrow.width+horizontal_x,arrow.width+horizontal_x,-arrow.width+horizontal_x,-arrow.width+horizontal_x),col=x['fill'])}
+    else{
+      polygon(c(x['start'],x['start'],as.numeric(x['end'])-(span*0.2),x['end'],as.numeric(x['end'])-(span*0.2),x['start']),
+              c(-arrow.width+horizontal_x,arrow.width+horizontal_x,arrow.width+horizontal_x,horizontal_x,-arrow.width+horizontal_x,-arrow.width+horizontal_x),col=x['fill'])}
+    for(i in seq(1:nrow(input))){
+      len<-input[i,]$end-input[i,]$start
+      mean_point<-((as.numeric(input[i,]$start)+as.numeric(input[i,]$end))/2)
+      #mean_point_ahead<-((as.numeric(input[i+1,]$start)+as.numeric(input[i+1,]$end))/2)
+      #mean_point_behind<-((as.numeric(input[i-1,]$start)+as.numeric(input[i-1,]$end))/2)
+      #segments(c(mean_point),c(0),c(mean_point),c(arrow.width+2))
+      #segments(c(mean_point),c(arrow.width+2),c(mean_point),c(arrow.width+5))
+      text(c(mean_point),c((arrow.width-0.5*arrow.width)+horizontal_x),paste(input[i,]$name),cex=font_cex,pos=1,srt=0,offset = 0)
+    }
+    
+   })
   }
-  print(i)
-  avg_dists<-c(avg_dists,c(na.omit(unlist(mat_subset))))
+
+
+svglite::svglite('cluster_of_clusters_arrows.svg', width=10, height =22)
+plot(NA, xlim=c(-100,100), ylim=c(-10,1000),axes=F, xlab=NA, ylab=NA)
+for( i in rev(c(1:length(clusters)))){
+  arrow_plot(rev(clusters)[[i]], horizontal_x = i*10, center_on = 'D', font_cex = 0.4)
 }
-
-boxplot(avg_dists)\
-
-
-names(avg_dists)<-synteny_clust$labels[synteny_clust$order]
-#regression of cluster distance
-
-synteny_subset_df<-df[df$synteny_dir_nhbr %in% rownames(synteny_dist),]
-sampled_assemb<-synteny_subset_df[sample(nrow(synteny_subset_df), 30), ]$assembly_x
-index<-c()
-for(a in gsub('\\.','_',sampled_assemb)){
-  index<-c(index,which(grepl(a,rownames(distmat))))
-}
-index<-sort(index)
-length(index)
-mat_subset<-distmat[index,index]
-z<-dist2list(as.dist(t(mat_subset)))
-z[,c(1,2)]<-apply(z[,c(1,2)],1, function(x) sort(x[c(1,2)]))
-z<-z[z$col != z$row,]
-z<-z[!duplicated(z[,c(1,2)] ),]
-z$g1<- gsub('(?<=\\d)_','\\.',sapply(z$col, function(x) str_extract(x,'GCF_.+?_\\d')), perl = T)
-z$g2<- gsub('(?<=\\d)_','\\.',sapply(z$row, function(x) str_extract(x,'GCF_.+?_\\d')), perl = T)
-
-z$g1_syn<- sapply(z$g1, function(x) toString(synteny_subset_df[synteny_subset_df['assembly_x'] == x,]['synteny_dir_nhbr'][1,1] ) )
-z$g2_syn<- sapply(z$g2, function(x) synteny_subset_df[synteny_subset_df['assembly_x'] == x,]['synteny_dir_nhbr'][1,1]  )
-z$syn_dist<- apply(z,1, function(x) synteny_dist[x['g1_syn'],x['g2_syn']])
-
-plot(z$value,z$syn_dist)
-res=lm(z$syn_dist ~ z$value, data=z)
-abline(res)
-
-# test----
-library(dendextend)
-
-family_tree<-read.tree('/Users/tslaird/Box/leveau_lab/GTDB/bac120_msa_r89_selected_families.faa.tree')
-plot(family_tree)
-y<-lapply(unique(as.character(GTDB_meta[GTDB_meta$gtdb_taxonomy %in% gtdb$gtdb_tax,]$gtdb_taxonomy )), function(x) str_split(x,';'))
-
-str_split(as.character(GTDB_meta$gtdb_taxonomy),';')[1:5]
-
-
-paste0('f__',unique(GTDB_taxonomy$Family))
+dev.off()
