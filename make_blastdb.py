@@ -23,7 +23,7 @@ def combine_files(file_list_index):
 if not os.path.exists("fasta_files_combined"):
     os.mkdir("fasta_files_combined")
 
-print("Making chunks of "+chunk_size+" fasta files")
+print("Making chunks of "+str(chunk_size)+" fasta files")
 with concurrent.futures.ProcessPoolExecutor(max_workers=number_of_cpus) as executor:
     for _ in executor.map(combine_files, range(len(file_chunks))):
         pass
@@ -44,4 +44,4 @@ print("Finished making blast databases")
 #make alias db
 print("Making alias database")
 combined_files_str = " ".join(combined_files_list)
-subprocess.call(['blastdb_aliastool','-dblist',combined_files_str,'-dbtype','prot','-out','fasta_files/all_proteins_combined_master','-title','all_proteins_combined_master'])
+subprocess.call(['blastdb_aliastool','-dblist',combined_files_str,'-dbtype','prot','-out','fasta_files_combined/fasta_files_combined_master','-title','all_proteins_combined_master'])

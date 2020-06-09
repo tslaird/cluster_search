@@ -1,6 +1,6 @@
 
 #!/usr/bin/env python3
-
+import psutil
 import re
 import sys
 import pandas as pd
@@ -18,7 +18,8 @@ import itertools
 import scipy
 from scipy import spatial
 
-
+#number of number_of_cpus
+number_of_cpus = int(psutil.cpu_count()/2)
 #ncbi key needed for fetching metadata
 ncbi_api_key="52553dfd9c090cfba1c3b28a45d8a648fd09"
 #define output director and include forward slash
@@ -279,8 +280,8 @@ def fetchneighborhood2(index,features_upstream = 0,features_downstream = 0):
     #synteny_dir_pident = re.sub("iaa" ,"", synteny_dir_pident)
     #obtains "A-B-C"
     synteny= re.sub("\n" ,"-", neighborhood['query_match'].to_string(index=False))
-    synteny= re.sub("iaa| " ,"", synteny)
-    synteny_alphabet = "".join([ gene['query_match'].replace("iaa","").upper() if gene['direction'] == 1 else gene['query_match'].replace("iaa","").lower() for index,gene in neighborhood.iterrows()  ])
+    synteny= re.sub("Iaa| " ,"", synteny)
+    synteny_alphabet = "".join([ gene['query_match'].replace("Iaa","").upper() if gene['direction'] == 1 else gene['query_match'].replace("Iaa","").lower() for index,gene in neighborhood.iterrows()  ])
     cluster_len= max(neighborhood['end_coord']) - min(neighborhood ['start_coord'])
     assembly= re.sub("\{|\}|\'|>","", str(set(neighborhood['assembly'])) )
     accession = re.sub("\{|\}|\'","", str(set(neighborhood['accession'])) )
@@ -338,9 +339,9 @@ if not os.path.exists(output_directory+"iaa_positive_df.pickle"):
 
     print('\nParsing filtered blastp output file')
     parse_blastp_input= list(set(blastout_filtered['accession']))
-    print(parse_blastp_input)
+    #print(parse_blastp_input)
     result_list=[]
-    with concurrent.futures.ProcessPoolExecutor(max_workers=None) as executor:
+    with concurrent.futures.ProcessPoolExecutor(max_workers=number_of_cpus) as executor:
         for i in executor.map(parseblastout2, parse_blastp_input):
             result_list.append(i)
             pass
@@ -351,7 +352,7 @@ if not os.path.exists(output_directory+"iaa_positive_df.pickle"):
     iaa_positive = list(filter(None, result_list))
     iaa_positive_flat = [item for sublist in iaa_positive for item in sublist]
     iaa_positive_df= pd.DataFrame(iaa_positive_flat, columns=('genome_acc','filename','biosample', 'hits', 'cluster_length','synteny','synteny_dir_dist','synteny_dir_pident','synteny_dir','assembly','accession','name','hit_list','old_locus_hit_list','protein_name_list','protein_id_list','pseudogene_list','query_list','coord_list','cluster_number'))
-    iaa_positive_df=iaa_positive_df[[len(set(i))>=6 for i in iaa_positive_df['synteny'].str.findall('\w')]]
+    iaa_positive_df=iaa_positive_df[[len(set(i))>=1 for i in iaa_positive_df['synteny'].str.findall('\w')]]
     iaa_positive_df['contig'] = iaa_positive_df['name'].str.contains('supercont|ctg|node|contig|scaffold|contigs',case=False)
     iaa_positive_df['complete_genome']= iaa_positive_df['name'].str.contains('complete',case=False)
     iaa_positive_df['plasmid'] = iaa_positive_df['name'].str.contains('plasmid')
@@ -470,7 +471,7 @@ inputs_indexprot = [re.sub('.gbff','_proteins.fa', i) for i in list(set(iaa_posi
 if not os.path.exists("index_files"):
     os.mkdir("index_files")
 
-with concurrent.futures.ThreadPoolExecutor(max_workers=None) as executor:
+with concurrent.futures.ThreadPoolExecutor(max_workers=number_of_cpus) as executor:
     for i in executor.map(make_indexprot, inputs_indexprot):
         pass
 
@@ -482,7 +483,7 @@ outputs_fetchneighborhood=[]
 def helper_fetchneighborhood2(index):
     return fetchneighborhood2(index,features_upstream = 0,features_downstream = 0)
 
-with concurrent.futures.ProcessPoolExecutor(max_workers=None) as executor:
+with concurrent.futures.ProcessPoolExecutor(max_workers=number_of_cpus) as executor:
     for i in executor.map(helper_fetchneighborhood2, inputs_fetchneighborhood):
         outputs_fetchneighborhood.append(i)
         pass

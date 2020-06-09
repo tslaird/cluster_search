@@ -162,7 +162,7 @@ def fetchneighborhood2(index,features_upstream = 0,features_downstream = 0):
     clusterGC = (g+c)/(g+c+a+t)
     diffGC = abs(clusterGC - genomeGC)
     #compare minhash values between cluster and genome
-    kmer_size=4
+    kmer_size=5
     n=0
     sc=1
     cluster_minhash= MinHash(n=n, ksize=kmer_size,scaled=sc)
@@ -358,10 +358,48 @@ if not os.path.exists(output_directory+"iac_positive_df.pickle"):
         output.writelines(assembly_list)
     print('Fetching genome metadata')
     all_accs=list(set(iac_positive_df['accession']))
-    all_biosamples = list(iac_positive_df['biosample'])
-    print(all_biosamples)
+    #fetch biosample id from accession
+    # this works better than getting the metadata from the biosample name
+    # there were errors
     batch=150
-    id_batches = [all_biosamples[i * batch:(i + 1) * batch] for i in range((len(all_biosamples) + batch - 1) // batch )]
+    accs_batches = [all_accs[i * batch:(i + 1) * batch] for i in range((len(all_accs) + batch - 1) // batch )]
+    accs_batch_str=[]
+    for i in accs_batches:
+        id_list=re.sub('\n',',',str(i))
+        id_list=re.sub(' ','',id_list)
+        id_list=re.sub("NA\',|\'",'',id_list)
+        id_list=re.sub("\[|\]","'",id_list)
+        id_list=re.sub(",","&id=",id_list)
+        id_list=re.sub("'","",id_list)
+        accs_batch_str.append(id_list)
+    gi_dict = {}
+    biosample_ids_dict={}
+    for i in accs_batch_str:
+        accs_list = re.findall("(?<=\=)\w+|^\w+",i)
+        url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/elink.fcgi?dbfrom=nuccore&db=biosample&id=" + i + "&api_key="+ncbi_api_key
+        buffer = BytesIO()
+        c = pycurl.Curl()
+        c.setopt(c.URL, url)
+        c.setopt(c.WRITEDATA, buffer)
+        c.perform()
+        c.close()
+        body = buffer.getvalue()
+        out=body.decode('iso-8859-1')
+        root = ET.fromstring(out)
+        for j in range(len(root.findall('./LinkSet'))):
+            sgi= root.findall('./LinkSet')[j].findall('./IdList/Id')
+            bsid= root.findall('./LinkSet')[j].findall('./LinkSetDb/Link/Id')
+            accs_list[j]
+            if bsid:
+                biosample_ids_dict[str(accs_list[j])] = bsid[0].text
+            else:
+                biosample_ids_dict[str(accs_list[j])] = "NA"
+            gi_dict[accs_list[j]] = sgi[0].text
+    iac_positive_df['biosample_id'] = iac_positive_df['accession'].map(biosample_ids_dict)
+    iac_positive_df['gi'] = iac_positive_df['accession'].map(gi_dict)
+    all_ids=list(iac_positive_df['biosample_id'])
+    batch=150
+    id_batches = [all_ids[i * batch:(i + 1) * batch] for i in range((len(all_ids) + batch - 1) // batch )]
     id_batch_str=[]
     for i in id_batches:
         id_list=re.sub('\n',',',str(i))
@@ -397,53 +435,53 @@ if not os.path.exists(output_directory+"iac_positive_df.pickle"):
         root = ET.fromstring(out)
         for i in root.findall('./BioSample'):
             bs_text = ET.tostring(i).decode('ISO-8859-1')
-            bs_acc=re.findall('(?<=\saccession\=")\w+',bs_text)[0]
+            bs_id=re.findall('(?<=\sid\=")\w+',bs_text)[0]
             isolation_source= i.findall('./Attributes/Attribute[@attribute_name="isolation_source"]')
             if isolation_source:
-                isolation_source_dict[bs_acc] = isolation_source[0].text
+                isolation_source_dict[bs_id] = isolation_source[0].text
             else:
-                isolation_source_dict[bs_acc] = "NA"
+                isolation_source_dict[bs_id] = "NA"
             env_biome= i.findall('./Attributes/Attribute[@attribute_name="env_biome"]')
             if env_biome:
-                env_biome_dict[bs_acc] = env_biome[0].text
+                env_biome_dict[bs_id] = env_biome[0].text
             else:
-                env_biome_dict[bs_acc] = "NA"
+                env_biome_dict[bs_id] = "NA"
             env_feature= i.findall('./Attributes/Attribute[@attribute_name="env_feature"]')
             if env_feature:
-                env_feature_dict[bs_acc] = env_feature[0].text
+                env_feature_dict[bs_id] = env_feature[0].text
             else:
-                env_feature_dict[bs_acc] = "NA"
+                env_feature_dict[bs_id] = "NA"
             host= i.findall('./Attributes/Attribute[@attribute_name="host"]')
             if host:
-                host_dict[bs_acc] = host[0].text
+                host_dict[bs_id] = host[0].text
             else:
-                host_dict[bs_acc] = "NA"
+                host_dict[bs_id] = "NA"
             host_sciname= i.findall('./Attributes/Attribute[@attribute_name="host scientific name"]')
             if host_sciname:
-                host_sciname_dict[bs_acc] = host_sciname[0].text
+                host_sciname_dict[bs_id] = host_sciname[0].text
             else:
-                host_sciname_dict[bs_acc] = "NA"
+                host_sciname_dict[bs_id] = "NA"
             strain= i.findall('./Attributes/Attribute[@attribute_name="strain"]')
             if strain:
-                strain_dict[bs_acc] = strain[0].text
+                strain_dict[bs_id] = strain[0].text
             else:
-                strain_dict[bs_acc] = "NA"
+                strain_dict[bs_id] = "NA"
             all_metadata = i.findall('./Attributes/Attribute[@attribute_name]')
             if all_metadata:
                 all_metadata_list=[]
                 for m in all_metadata:
                     all_metadata_list.append( (m.attrib['attribute_name'], m.text ))
-                all_meta_dict[bs_acc]= all_metadata_list
+                all_meta_dict[bs_id]= all_metadata_list
             else:
-                all_meta_dict[bs_acc] = "NA"
-    print(isolation_source_dict)
-    iac_positive_df['isolation_src'] = iac_positive_df['biosample'].map(isolation_source_dict)
-    iac_positive_df['env_biome'] = iac_positive_df['biosample'].map(env_biome_dict)
-    iac_positive_df['env_feature'] = iac_positive_df['biosample'].map(env_feature_dict)
-    iac_positive_df['host'] = iac_positive_df['biosample'].map(host_dict)
-    iac_positive_df['host_sciname'] = iac_positive_df['biosample'].map(host_sciname_dict)
-    iac_positive_df['strain'] = iac_positive_df['biosample'].map(strain_dict)
-    iac_positive_df['all_biosample_metadata'] = iac_positive_df['biosample'].map(all_meta_dict)
+                all_meta_dict[bs_id] = "NA"
+    #print(isolation_source_dict)
+    iac_positive_df['isolation_src'] = iac_positive_df['biosample_id'].map(isolation_source_dict)
+    iac_positive_df['env_biome'] = iac_positive_df['biosample_id'].map(env_biome_dict)
+    iac_positive_df['env_feature'] = iac_positive_df['biosample_id'].map(env_feature_dict)
+    iac_positive_df['host'] = iac_positive_df['biosample_id'].map(host_dict)
+    iac_positive_df['host_sciname'] = iac_positive_df['biosample_id'].map(host_sciname_dict)
+    iac_positive_df['strain'] = iac_positive_df['biosample_id'].map(strain_dict)
+    iac_positive_df['all_biosample_metadata'] = iac_positive_df['biosample_id'].map(all_meta_dict)
     all_assemblies= ['RS_'+ i for i in list(set(iac_positive_df['assembly']))]
     gtdb_metadata = pd.read_csv('gtdb/bac120_metadata_r89.tsv', sep='\t')
     gtdb_matches= gtdb_metadata[gtdb_metadata['accession'].isin(all_assemblies)]
