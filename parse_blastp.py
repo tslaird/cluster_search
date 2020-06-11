@@ -281,7 +281,7 @@ def fetchneighborhood2(index,features_upstream = 0,features_downstream = 0):
     accession = re.sub("\{|\}|\'","", str(set(neighborhood['accession'])) )
     title= re.sub("\{|\}|\'", "",str(set(neighborhood['name'])) )
     print(assembly_index_file + " successfully used")
-    return([accession, assembly, title, len(neighborhood), cluster_len, synteny,synteny_alphabet, synteny_dir_dist, synteny_dir, cluster_number,coord_list,adj_coord_list,tared_adj_coord_list,itol_diagram_string, nhbrhood_hit_list,nhbrhood_locus_tags,nhbrhood_old_locus_tags,nhbrhood_prot_ids,nhbrhood_prot_name,nhbrhood_prot_seq, clusterGC, genomeGC,diffGC,minhash_sim,four_mer_distance,four_mer_freq_cluster, cluster_seq])
+    return([accession, assembly, title, len(neighborhood), cluster_len, synteny,synteny_alphabet, synteny_dir_dist, synteny_dir, cluster_number,coord_list,adj_coord_list,tared_adj_coord_list,itol_diagram_string, nhbrhood_hit_list,nhbrhood_locus_tags,nhbrhood_old_locus_tags,nhbrhood_prot_ids,nhbrhood_prot_name,nhbrhood_prot_seq, clusterGC, genomeGC,diffGC,minhash_sim, four_mer_freq_cluster,four_mer_freq_genome, four_mer_distance, cluster_seq])
 
 ###running the functions
 if not os.path.exists("gtdb/"):
@@ -482,15 +482,18 @@ if not os.path.exists(output_directory+"iac_positive_df.pickle"):
     iac_positive_df['host_sciname'] = iac_positive_df['biosample_id'].map(host_sciname_dict)
     iac_positive_df['strain'] = iac_positive_df['biosample_id'].map(strain_dict)
     iac_positive_df['all_biosample_metadata'] = iac_positive_df['biosample_id'].map(all_meta_dict)
-    all_assemblies= ['RS_'+ i for i in list(set(iac_positive_df['assembly']))]
+    #match to gtdb independant;y of assembly version
+    iac_positive_df['assembly_base']= iac_positive_df['assembly'].str.split(pat='\.',expand=True)[0]
+    all_assemblies= ['RS_'+ i for i in list(set(iac_positive_df['assembly_base']))]
     gtdb_metadata = pd.read_csv('gtdb/bac120_metadata_r89.tsv', sep='\t')
-    gtdb_matches= gtdb_metadata[gtdb_metadata['accession'].isin(all_assemblies)]
-    gtdb_matches.loc[:,'accession'] = gtdb_matches['accession'].str.replace('RS_','')
-    gtdb_dict = gtdb_matches[['accession','gtdb_taxonomy']].to_dict()
-    gtdb_dict = dict(zip(gtdb_matches['accession'], gtdb_matches['gtdb_taxonomy']))
-    ncbi_dict = dict(zip(gtdb_matches['accession'], gtdb_matches['ncbi_taxonomy']))
-    iac_positive_df['gtdb_tax'] = iac_positive_df['assembly'].map(gtdb_dict)
-    iac_positive_df['ncbi_tax'] = iac_positive_df['assembly'].map(ncbi_dict)
+    gtdb_metadata['accession_base'] = gtdb_metadata['accession'].str.split(pat='\.',expand=True)[0]
+    gtdb_matches= gtdb_metadata[gtdb_metadata['accession_base'].isin(all_assemblies)]
+    gtdb_matches['accession_base_'] = gtdb_matches['accession_base'].str.replace('RS_','')
+    #gtdb_dict = gtdb_matches[['accession_base_','gtdb_taxonomy']].to_dict()
+    gtdb_dict = dict(zip(gtdb_matches['accession_base_'], gtdb_matches['gtdb_taxonomy']))
+    ncbi_dict = dict(zip(gtdb_matches['accession_base_'], gtdb_matches['ncbi_taxonomy']))
+    iac_positive_df['gtdb_tax'] = iac_positive_df['assembly_base'].map(gtdb_dict)
+    iac_positive_df['ncbi_tax'] = iac_positive_df['assembly_base'].map(ncbi_dict)
     iac_positive_df['same_taxonomy'] = iac_positive_df['gtdb_tax'] == iac_positive_df['ncbi_tax']
     iac_positive_df[['domain_gtdb','phylum_gtdb','class_gtdb','order_gtdb','family_gtdb','genus_gtdb','species_gtdb']]=iac_positive_df['gtdb_tax'].str.split(";", expand = True)
     print('\nWriting iac cluster positive data frame to file')
@@ -507,7 +510,7 @@ with concurrent.futures.ThreadPoolExecutor(max_workers=None) as executor:
     for i in executor.map(make_indexprot, inputs_indexprot):
         pass
 
-fetchneighborhood_columns=['accession','assembly', 'title', 'feature_count_nhbr', 'cluster_len_nhbr', 'synteny_nhbr','synteny_alphabet_nhbr', 'synteny_dir_dist_nhbr', 'synteny_dir_nhbr','cluster_number','coord_list','adj_coord_list','tared_adj_coord_list','itol_cluster_string', 'nhbrhood_hit_list','nhbrhood_locus_tags','nhbrhood_old_locus_tags','nhbrhood_prot_ids','nhbrhood_prot_name','nhbrhood_prot_seq', 'clusterGC','genomeGC','diffGC','minhash_similarity','four_mer_distance','four_mer_freq_cluster','cluster_seq']
+fetchneighborhood_columns=['accession','assembly', 'title', 'feature_count_nhbr', 'cluster_len_nhbr', 'synteny_nhbr','synteny_alphabet_nhbr', 'synteny_dir_dist_nhbr', 'synteny_dir_nhbr','cluster_number','coord_list','adj_coord_list','tared_adj_coord_list','itol_cluster_string', 'nhbrhood_hit_list','nhbrhood_locus_tags','nhbrhood_old_locus_tags','nhbrhood_prot_ids','nhbrhood_prot_name','nhbrhood_prot_seq', 'clusterGC','genomeGC','diffGC','minhash_similarity','four_mer_freq_cluster','four_mer_freq_genome','four_mer_distance','cluster_seq']
 inputs_fetchneighborhood = list(range(0,len(iac_positive_df)))
 outputs_fetchneighborhood=[]
 
