@@ -21,7 +21,7 @@ x<-cluster_df[cluster_df$clusterGC>0.5,]
 
 #mean GC content of iac in genus Escherichia
 mean(cluster_df[cluster_df$genus_gtdb=='g__Escherichia',]$diffGC)
-mean(cluster_df[cluster_df$genus_gtdb=='g__Klebsiella',]$diffGC)
+mean(cluster_df[cluster_df$species_gtdb=='s__Klebsiella pneumoniae',]$diffGC)
 
 summary(lm(cluster_df$diffGC~cluster_df$four_mer_distance))
 
@@ -33,10 +33,16 @@ TukeyHSD(an)
 # identify iac clusters with mobilization genes nearby
 cluster_df_10<-read.csv('/home/tslaird/leveau_lab/cluster_search/FARM_output/iac_positive_all_data_10_10.tsv',sep='\t')
 mobilization<-cluster_df_10[grep('integrase|transposase|phage',cluster_df_10$nhbrhood_prot_name),]$accession
+mobilization_phage<-cluster_df_10[grep('phage',cluster_df_10$nhbrhood_prot_name),]$accession
 mobile_df<-cluster_df[cluster_df$accession %in% mobilization,]
 length(unique(mobile_df$assembly))
 mobile_df[mobile_df$diffGC>0.06,]$species_gtdb
+mean(mobile_df$diffGC)
+barplot(sort(mobile_df$diffGC))
+barplot(sort(cluster_df$diffGC))
 table(mobile_df$family_gtdb)
+mobile_df[ mobile_df$diffGC<0.04,]$species_gtdb
+
 
 #tabulate percent per taxonomy
 GTDB_meta <- read.csv('/home/tslaird/leveau_lab/cluster_search/gtdb/bac120_metadata_r89.tsv', sep='\t')

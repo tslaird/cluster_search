@@ -204,7 +204,7 @@ svglite::svglite('cluster_of_clusters_pheatmap_only.svg',width = 10, height=11)
 pdf('clusters_pheatmap_bw.pdf',width = 10, height=15)
 ph<-pheatmap(x, cluster_rows = hclust,cluster_cols = FALSE, cellwidth = 8, cellheight = 5,
          border_color = 'grey', labels_row = hclust$labels,fontsize_row = 6.5,
-         color = c('white','black'))
+         color = c('white','black'), gaps_col = 5)
 ph$gtable$grobs[[1]]$gp <- gpar(lex=3.5)
 ph
 dev.off()
