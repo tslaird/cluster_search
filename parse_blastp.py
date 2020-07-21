@@ -40,6 +40,17 @@ def parseblastout2(accession):
         middle_coords = genome_match_sorted['middle_coord']
         middle_coords_np = np.array(middle_coords)
         genome_match_sorted['groups']=list(np.cumsum([0] + list(1*(middle_coords_np[1:] - middle_coords_np[0:-1] >= 10000))) + 1)
+        gene_color_dict={ 'IacA':'#ff5969',
+                        'IacB':'#2db34e',
+                        'IacC':'#fb77e0',
+                        'IacD':'#00bc7e',
+                        'IacE':'#8d006e',
+                        'IacF':'#cfdd63',
+                        'IacG':'#0060d0',
+                        'IacR':'#bb7b00',
+                        'IacH':'#7c2c29',
+                        'IacI':'#f1d17a',
+                        'x':'#d1d1d1'}
         list_of_clusters = []
         for cluster_number, df in genome_match_sorted.groupby('groups'):
             if len(df) >= 1:
@@ -49,6 +60,10 @@ def parseblastout2(accession):
                 protein_id_list = list(df['protein_id'])
                 query_list = list(df['qseqid'])
                 coord_list = list(zip(df['start_coord'], df['end_coord'],df['direction'],df['qseqid']))
+                ncbi_graphics=''
+                for i in coord_list:
+                    ncbi_graphics= ncbi_graphics+ str(i[0])+':'+str(i[1])+"|"+i[3]+"|"+gene_color_dict[i[3]]+","
+                ncbi_graphics= ncbi_graphics[0:-1]
                 if sum(df['direction']) < 0:
                     df['actual_start_tmp'] = df['start_coord']
                     df['start_coord']= df['end_coord'] * -1
@@ -80,7 +95,7 @@ def parseblastout2(accession):
                 cluster_len= max(df['end_coord']) - min(df['start_coord'])
                 number_of_hits = len(df)
                 pseudogene_list= list(df['pseudogene'])
-                list_of_clusters.append([accession, filename, biosample, number_of_hits , cluster_len, synteny, synteny_dir_dist, synteny_dir_pident, synteny_dir, assembly, accession, name, hit_list, old_locus_hit_list, protein_name_list, protein_id_list, pseudogene_list, query_list, coord_list, cluster_number])
+                list_of_clusters.append([accession, filename, biosample, number_of_hits , cluster_len, synteny, synteny_dir_dist, synteny_dir_pident, synteny_dir, assembly, accession, name, hit_list, old_locus_hit_list, protein_name_list, protein_id_list, pseudogene_list, query_list, coord_list, cluster_number, ncbi_graphics])
         return(list_of_clusters)
 
 def make_indexprot(file, replace = False):
@@ -259,7 +274,6 @@ def fetchneighborhood2(index,features_upstream = 0,features_downstream = 0):
             gene_string.append(str(g[3]))
         itol_gene='|'.join(gene_string)
         itol_diagram.append(itol_gene)
-
     itol_diagram_joined=",".join(map(str,itol_diagram))
     itol_diagram_string= str(max_len)+','+itol_diagram_joined
     itol_diagram_string = re.sub(',\|',',',itol_diagram_string)
