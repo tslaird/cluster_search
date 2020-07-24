@@ -137,13 +137,17 @@ for i, name in zip(synteny_blocks_df['blocks'],synteny_blocks_df['file']):
                    pos_block_list.append(contig[j-neighborhood : j+neighborhood])
    
 pos_synteny_blocks_df=pd.DataFrame(list(zip(pos_file_list,pos_block_list)),columns=['file','blocks']) 
-for i in pos_synteny_blocks_df['blocks']:
-    for j in pos_synteny_blocks_df['blocks']:
-        sim=jaccard(i,j)
-        print(sim)
 
+sim_list=[]
+for i in range(0, len(pos_synteny_blocks_df['blocks'])):
+    for j in range(0, len(pos_synteny_blocks_df['blocks'])):
+        if i==j:
+            pass
+        else:
+            sim_list.append( jaccard(pos_synteny_blocks_df['blocks'][i],pos_synteny_blocks_df['blocks'][j]) )
 
-
+mean_cluster_similarity=sum(sim_list)/len(sim_list)
+print(mean_cluster_similarity)
 
 
 
