@@ -17,8 +17,10 @@ import math
 import networkx
 import time
 import concurrent.futures
+import os
 
 
+fasta_files_directory="/home/tslaird/leveau_lab/cluster_search/fasta_files/"
 
 def getNewick(node, newick, parentdist, leaf_names):
     if node.is_leaf():
@@ -32,6 +34,11 @@ def getNewick(node, newick, parentdist, leaf_names):
         newick = getNewick(node.get_right(), ",%s" % (newick), node.dist, leaf_names)
         newick = "(%s" % (newick)
         return newick
+    
+def jaccard(list1, list2):
+    intersection = len(list(set(list1).intersection(list2)))
+    union = (len(list1) + len(list2)) - intersection
+    return float(intersection) / union
 
 def parse_cdhit(cluster_file):
     with open(cluster_file) as file:
@@ -41,8 +48,12 @@ def parse_cdhit(cluster_file):
     rep_names=[]
     rep_full_names=[]
     clstr_tally=[]
+    cluster_dict={}
     for cluster in all_clusters:
         #print(cluster)
+        cluster_id=cluster.split('\n')[0]
+        for protein in re.findall("(?<=\>)[\s\S]+?(?=\.{3})", cluster):
+            cluster_dict[protein] = cluster_id    
         split_cluster= cluster.split("!!")
         rep_names.append(split_cluster[7]+"_"+split_cluster[9])
         #rep_names.append(split_cluster[6]+"_"+split_cluster[8])
@@ -78,16 +89,63 @@ def parse_cdhit(cluster_file):
     cluster_df['rep_name'] = rep_names
     cluster_df['rep_full_name']= rep_full_name
     cluster_df = cluster_df[ ['rep_name'] +['rep_full_name']+ [ col for col in cluster_df.columns if col not in ['rep_name','rep_full_name' ] ]]
-    return([cluster_df,edge_list_df,newick])
+    return([cluster_df,edge_list_df,newick,cluster_dict])
     
 
-cd_hit_pg=parse_cdhit('/home/tslaird/leveau_lab/cluster_search/all_Pput_proteins_cdhit_60.clstr')
+cd_hit_pg=parse_cdhit('/home/tslaird/leveau_lab/cluster_search/cd_hit_test/all_Pput_proteins_cdhit_60.clstr')
 
 cd_hit_pg[0].to_csv('/home/tslaird/leveau_lab/cluster_search/all_Pput_proteins_cdhit_60.matrix')
 cd_hit_pg[1].to_csv('/home/tslaird/leveau_lab/cluster_search/all_Pput_proteins_cdhit_60.edges.tsv',sep='\t',index=False, header=False)
 
 with open('/home/tslaird/leveau_lab/cluster_search/all_Pput_proteins_cdhit_60.newick','w') as file:
     file.write(cd_hit_pg[2])
+
+
+#get cluster sequence in each genome
+synteny_blocks_all=[]
+for i in os.listdir(fasta_files_directory):
+    print(i)
+    with open (fasta_files_directory+i) as file:
+        fasta_text=file.read()
+    protein_ids=re.findall('(?<=\>)[\s\S]+?(?=\n)',fasta_text)
+    protein_info = pd.DataFrame(protein_ids, columns = ['name'] )
+    protein_info['cluster_id']=protein_info['name'].map(cd_hit_pg[3])
+    protein_info[["filename","assembly","accession","locus_tag","old_locus_tag","name","biosample","protein_name","coordinates","protein_id","pseudogene"]] = protein_info['name'].str.split("!!", expand = True)
+    synteny_blocks=[]
+    for acc in set(protein_info['accession']):
+        synteny=list(protein_info[protein_info['accession'] == acc]['cluster_id'])
+        synteny_blocks.append(synteny)
+    synteny_blocks_all.append(synteny_blocks)
+synteny_blocks_df=pd.DataFrame(list(zip(os.listdir(fasta_files_directory),synteny_blocks_all)),columns=['file','blocks'])
+
+#find cluster synteny for a particular cluster
+search_cluster='464'
+neighborhood=5
+pos_file_list=[]
+pos_block_list=[]
+for i, name in zip(synteny_blocks_df['blocks'],synteny_blocks_df['file']):
+    if len(i) > 1:
+        for j, k in enumerate(i):
+                if k == search_cluster:
+                   pos_file_list.append(name)
+                   pos_block_list.append(i[j-neighborhood : j+neighborhood])
+    else:
+        for contig in i:
+            for j, k in enumerate(contig):
+                if k == search_cluster:
+                   pos_file_list.append(name)
+                   pos_block_list.append(contig[j-neighborhood : j+neighborhood])
+   
+pos_synteny_blocks_df=pd.DataFrame(list(zip(pos_file_list,pos_block_list)),columns=['file','blocks']) 
+for i in pos_synteny_blocks_df['blocks']:
+    for j in pos_synteny_blocks_df['blocks']:
+        sim=jaccard(i,j)
+        print(sim)
+
+
+
+
+
 
 
 adj=cd_hit_pg[0].iloc[:,3:37].dot(cd_hit_pg[0].iloc[:,3:37].transpose())
@@ -207,7 +265,7 @@ def iter_fetest(row):
         negpos=combo.count((0,1))
         negneg=combo.count((0,0))
         contingency_table=tuple([tuple([pospos,posneg]),tuple([negpos,negneg])]) 
-        jaccard.append(scipy.spatial.distance.jaccard(row[1::],row2[1::]))
+        #jaccard.append(scipy.spatial.distance.jaccard(row[1::],row2[1::]))
         #try:
         #    phi= ((pospos*negneg)-(posneg*negpos))/math.sqrt((pospos+posneg)*(negpos+negneg)*(pospos+negpos)*(posneg+negneg))     
         #except:
@@ -230,19 +288,18 @@ with concurrent.futures.ProcessPoolExecutor(max_workers=None) as executor:
         pass    
 print(time.time()-start)   
 
-Z=np.array(out)
-Z_indices=np.triu_indices(len(Z),-1)
-Z[Z_indices]=0
-Z_tri=np.tril(Z)
-np.fill_diagonal(Z_tri, 0)
-Z_masked=np.ma.masked_equal(Z_tri,-1)
-#Z_data=ma.getdata(Z_masked)
-Z_data=Z[Z_masked>0]
-p_adj=multi.multipletests(Z_data,method='fdr_bh')[1]
-
-Z_adj = np.zeros(Z.shape)
-indices = np.tril_indices(len(Z),-1)
-Z_adj[indices] = p_adj
+pwise_FE=np.array(out)
+pwise_FE_indices=np.triu_indices(len(pwise_FE),0)
+pwise_FE[pwise_FE_indices]=0
+pwise_FE_tri=np.tril(pwise_FE)
+np.fill_diagonal(pwise_FE_tri, 0)
+pwise_FE_masked=np.ma.masked_equal(pwise_FE_tri,0)
+#pwise_FE_data=ma.getdata(pwise_FE_masked)
+pwise_FE_data=pwise_FE[pwise_FE_masked>0]
+p_adj=multi.multipletests(pwise_FE_data,method='fdr_bh')[1]
+pwise_FE_adj = np.zeros(pwise_FE.shape)
+indices = np.tril_indices(len(pwise_FE),-1)
+pwise_FE_adj[indices] = p_adj
 
 
 
