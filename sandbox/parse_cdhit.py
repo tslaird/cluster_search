@@ -40,31 +40,44 @@ def jaccard(list1, list2):
     union = (len(list1) + len(list2)) - intersection
     return float(intersection) / union
 
+#cluster_file='/home/tslaird/leveau_lab/cluster_search/cd_hit_test/all_Pput_proteins_cdhit_60.clstr'
 def parse_cdhit(cluster_file):
     with open(cluster_file) as file:
         cdhit_clstr=file.read()
     all_genomes= set(re.findall("(?<=!!)GCF_.+?(?=!!)",cdhit_clstr))
-    all_clusters= cdhit_clstr.split(">Cluster ")[1:]
+    all_clusters= cdhit_clstr.split(">Cluster ")[1::]
     rep_names=[]
     rep_full_names=[]
     clstr_tally=[]
+    clstr_pids=[]
     cluster_dict={}
     for cluster in all_clusters:
         #print(cluster)
         cluster_id=cluster.split('\n')[0]
+        print(cluster_id)
         for protein in re.findall("(?<=\>)[\s\S]+?(?=\.{3})", cluster):
             cluster_dict[protein] = cluster_id    
+        all_info_df = pd.DataFrame( re.findall('(?<=\>)[\s\S]+?(?=\.{3})', cluster) , columns = ['name'])
+        all_info_df[["filename","assembly","accession","locus_tag","old_locus_tag","name","biosample","protein_name","coordinates","protein_id","pseudogene"]] = all_info_df['name'].str.split("!!", expand = True)
         split_cluster= cluster.split("!!")
         rep_names.append(split_cluster[7]+"_"+split_cluster[9])
         #rep_names.append(split_cluster[6]+"_"+split_cluster[8])
         rep_full_name = cluster.split(", >")[1].split("... ")[0]
         rep_full_names.append(rep_full_name)
         genome_tally=[]
+        genome_pids=[]
         for genome in all_genomes:
+            if genome in all_info_df['assembly'].values:
+                pids=" ".join( all_info_df[ all_info_df['assembly']== genome]['locus_tag'].tolist() )
+            else:
+                pids=''
+            genome_pids.append(pids)
             genome_tally.append(cluster.count("!!"+genome+"!!"))
             #genome_tally.append(cluster.count(">"+genome+"!!"))
         clstr_tally.append(genome_tally)
+        clstr_pids.append(genome_pids)
     cluster_df=pd.DataFrame(data=clstr_tally, index=["Cluster_"+str(i) for i in range(0,len(all_clusters))], columns= all_genomes)
+    cluster_df_pids=pd.DataFrame(data=clstr_pids, index=["Cluster_"+str(i) for i in range(0,len(all_clusters))], columns= all_genomes)
     #make edge list
     edge_list=[]
     for i in cluster_df.index:
@@ -88,13 +101,19 @@ def parse_cdhit(cluster_file):
     newick=getNewick(tree, "", data_array, cluster_df.columns[scipy.cluster.hierarchy.leaves_list(hclust)])
     cluster_df['rep_name'] = rep_names
     cluster_df['rep_full_name']= rep_full_name
+    cluster_df_pids['rep_name'] = rep_names
     cluster_df = cluster_df[ ['rep_name'] +['rep_full_name']+ [ col for col in cluster_df.columns if col not in ['rep_name','rep_full_name' ] ]]
-    return([cluster_df,edge_list_df,newick,cluster_dict])
+    cluster_df_pids['rep_full_name']= rep_full_name
+    cluster_df_pids = cluster_df_pids[ ['rep_name'] +['rep_full_name']+ [ col for col in cluster_df_pids.columns if col not in ['rep_name','rep_full_name' ] ]]
+    return([cluster_df,edge_list_df,newick,cluster_dict, cluster_df_pids])
     
 
 cd_hit_pg=parse_cdhit('/home/tslaird/leveau_lab/cluster_search/cd_hit_test/all_Pput_proteins_cdhit_60.clstr')
 
 cd_hit_pg[0].to_csv('/home/tslaird/leveau_lab/cluster_search/all_Pput_proteins_cdhit_60.matrix')
+cd_hit_pg[4].to_csv('/home/tslaird/leveau_lab/cluster_search/cd_hit_test/all_Pput_proteins_cdhit_60.id_matrix')
+
+
 cd_hit_pg[1].to_csv('/home/tslaird/leveau_lab/cluster_search/all_Pput_proteins_cdhit_60.edges.tsv',sep='\t',index=False, header=False)
 
 with open('/home/tslaird/leveau_lab/cluster_search/all_Pput_proteins_cdhit_60.newick','w') as file:
@@ -103,6 +122,7 @@ with open('/home/tslaird/leveau_lab/cluster_search/all_Pput_proteins_cdhit_60.ne
 
 #get cluster sequence in each genome
 synteny_blocks_all=[]
+locus_tags_all=[]
 for i in os.listdir(fasta_files_directory):
     print(i)
     with open (fasta_files_directory+i) as file:
@@ -112,42 +132,78 @@ for i in os.listdir(fasta_files_directory):
     protein_info['cluster_id']=protein_info['name'].map(cd_hit_pg[3])
     protein_info[["filename","assembly","accession","locus_tag","old_locus_tag","name","biosample","protein_name","coordinates","protein_id","pseudogene"]] = protein_info['name'].str.split("!!", expand = True)
     synteny_blocks=[]
+    locus_tags=[]
     for acc in set(protein_info['accession']):
         synteny=list(protein_info[protein_info['accession'] == acc]['cluster_id'])
+        tag = list(protein_info[protein_info['accession'] == acc]['locus_tag'])
         synteny_blocks.append(synteny)
+        locus_tags.append(tag)
     synteny_blocks_all.append(synteny_blocks)
-synteny_blocks_df=pd.DataFrame(list(zip(os.listdir(fasta_files_directory),synteny_blocks_all)),columns=['file','blocks'])
+    locus_tags_all.append(locus_tags)
+synteny_blocks_df=pd.DataFrame(list(zip(os.listdir(fasta_files_directory),synteny_blocks_all, locus_tags_all)),columns=['file','blocks','tags'])
+
+replace_blocks=[]
+for genome in range(0, len(synteny_blocks_df['blocks'])):
+    genome_blocks=[]
+    for contig in range(0,len(synteny_blocks_df['blocks'][genome])):
+        contig_blocks=[]
+        for prot in synteny_blocks_df['blocks'][genome][contig]:
+            contig_blocks.append(0)
+        genome_blocks.append(contig_blocks)
+    replace_blocks.append(genome_blocks)
+
 
 #find cluster synteny for a particular cluster
-search_cluster='464'
-neighborhood=5
-pos_file_list=[]
-pos_block_list=[]
-for i, name in zip(synteny_blocks_df['blocks'],synteny_blocks_df['file']):
-    if len(i) > 1:
-        for j, k in enumerate(i):
+unique_cluster_ids = list(dict.fromkeys(cd_hit_pg[3].values()))
+for cluster_id in unique_cluster_ids[1:2000]:
+    search_cluster= cluster_id
+    neighborhood=5
+    pos_file_list=[]
+    pos_file_index=[]
+    pos_block_list=[]
+    #i = synteny_blocks_df['blocks'][14]
+    list_of_index=[]
+    for i, name_index in zip(synteny_blocks_df['blocks'],range(0, len(synteny_blocks_df['file'])) ):
+        for contig in range(0,len(i)):
+            for j, k in enumerate(i[contig]):
                 if k == search_cluster:
-                   pos_file_list.append(name)
-                   pos_block_list.append(i[j-neighborhood : j+neighborhood])
+                   list_of_index.append([name_index,contig,j])
+                   pos_file_list.append(synteny_blocks_df['file'][name_index])
+                   pos_file_index.append(name_index)
+                   if (j-neighborhood > 0): 
+                       pos_block_list.append(i[contig][j-neighborhood : j+neighborhood+1])
+                   else:
+                       pos_block_list.append(i[contig][0 : j+neighborhood+1])
+                        
+       
+    pos_synteny_blocks_df=pd.DataFrame(list(zip(pos_file_list,pos_block_list, list_of_index)),columns=['file','blocks','protein_index']) 
+    
+    if len(pos_synteny_blocks_df) > 1:
+        sim_list=[]
+        for i in range(0, len(pos_synteny_blocks_df['blocks'])):
+            for j in range(0, len(pos_synteny_blocks_df['blocks'])):
+                sim_list.append( jaccard(pos_synteny_blocks_df['blocks'][i],pos_synteny_blocks_df['blocks'][j]) )
+        diff_array = np.array([1-x for x in sim_list])
+        diff_array.shape=(len(pos_synteny_blocks_df['blocks']), len(pos_synteny_blocks_df['blocks']))
+        diff_mat=np.triu(diff_array)
+        linkage_mat=scipy.cluster.hierarchy.linkage(diff_array[np.triu_indices( diff_array.shape[0], 1)])
+        labels_ = [int(i) for i in scipy.cluster.hierarchy.cut_tree(linkage_mat, height=0.8)]
+        pos_synteny_blocks_df['labels']=[ str(search_cluster)+"_"+str(i) for i in labels_ ]
     else:
-        for contig in i:
-            for j, k in enumerate(contig):
-                if k == search_cluster:
-                   pos_file_list.append(name)
-                   pos_block_list.append(contig[j-neighborhood : j+neighborhood])
-   
-pos_synteny_blocks_df=pd.DataFrame(list(zip(pos_file_list,pos_block_list)),columns=['file','blocks']) 
+        pos_synteny_blocks_df['labels'] = str(search_cluster)+"_"+"0"
+    for entry in pos_synteny_blocks_df.iterrows():
+        replace_blocks[ entry[1][2][0] ][ entry[1][2][1] ][ entry[1][2][2] ] = entry[1][3]
 
-sim_list=[]
-for i in range(0, len(pos_synteny_blocks_df['blocks'])):
-    for j in range(0, len(pos_synteny_blocks_df['blocks'])):
-        if i==j:
-            pass
-        else:
-            sim_list.append( jaccard(pos_synteny_blocks_df['blocks'][i],pos_synteny_blocks_df['blocks'][j]) )
 
-mean_cluster_similarity=sum(sim_list)/len(sim_list)
-print(mean_cluster_similarity)
+
+
+from sklearn.cluster import AgglomerativeClustering
+clustering = AgglomerativeClustering(distance_threshold=2, n_clusters=None).fit(np.triu(diff_array))
+clustering.labels_
+pos_synteny_blocks_df['labels']=[ str(search_cluster)+"_"+str(i) for i in clustering.labels_ ]
+
+
+
 
 
 
